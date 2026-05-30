@@ -2,7 +2,7 @@
 
 ![winindex screenshot](src/ui/assets/screenshot.png)
 
-Blazing-fast file search for Windows. winindex builds a full index of your local drives and returns results as you type, with no perceptible delay even across millions of files.
+Blazing fast file search for Windows. winindex builds a full index of your local drives and returns results as you type, with no perceptible delay even across millions of files.
 
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![Language](https://img.shields.io/badge/language-C%2B%2B20-orange)
