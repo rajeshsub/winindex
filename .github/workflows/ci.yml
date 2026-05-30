@@ -45,6 +45,9 @@ jobs:
         run: cpack -G ZIP -C Release
         working-directory: build
 
+      - name: Install NSIS
+        run: choco install nsis --no-progress -y
+
       - name: Package (NSIS installer)
         run: cpack -G NSIS -C Release
         working-directory: build
