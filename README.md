@@ -1,0 +1,191 @@
+# winindex
+
+Blazing-fast file search for Windows. winindex builds a full index of your local drives and returns results as you type, with no perceptible delay even across millions of files.
+
+![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
+![Language](https://img.shields.io/badge/language-C%2B%2B20-orange)
+![License](https://img.shields.io/badge/license-MIT-green)
+![CI](https://github.com/rajeshsub/winindex/actions/workflows/ci.yml/badge.svg)
+
+---
+
+## Features
+
+- **Instant search** — results appear as you type, debounced at 150 ms
+- **MFT scanning** — on NTFS drives with administrator privileges, winindex reads the Master File Table directly, indexing a full drive in seconds rather than minutes
+- **Fallback scanner** — on FAT32, exFAT, or without elevation, a fast `FindFirstFile` BFS scanner is used automatically
+- **Regex support** — powered by [RE2](https://github.com/google/re2); toggle with Alt+1
+- **SIMD-accelerated substring search** — runtime dispatch to AVX2 → SSE4.2 → scalar fallback for substring queries
+- **Search modes** — case-sensitive, whole-word, match full path, ignore diacritics; all togglable from the Search menu
+- **Live change watching** — USN journal monitoring keeps the index fresh after the initial build
+- **Portable mode** — place a `winindex.ini` next to the executable and all data stays in that directory
+- **Persistent index** — the index is serialised to disk (CRC-32 validated) and loaded on startup; only rebuilt when stale or missing
+- **Context menu** — open file, open containing folder, copy full path, copy filename, cut (shell move), delete (Recycle Bin)
+- **Smart exclusions** — Windows system folders, `Program Files`, `ProgramData`, AppData, and user-configurable paths are excluded by default
+
+---
+
+## How it works
+
+```
+  Indexer  ----index---->  IndexStore (memory + .idx)
+  (MFT or FindFile)               |
+       ^                          | entries
+       | USN journal              v
+  ChangeWatcher           SearchEngine (SIMD / RE2)
+                                  |
+                                  | results
+                                  v
+                           MainWindow (Win32 UI)
+```
+
+### Index build
+
+1. On first launch, a setup dialog asks which drives to index and which paths to exclude.
+2. The **Indexer** checks whether a valid on-disk index exists (configurable max-age, default 48 h). If not, it rebuilds.
+3. For each selected drive the appropriate scanner is chosen:
+   - **MftScanner** — opens the volume with `GENERIC_READ` and issues `FSCTL_ENUM_USN_DATA` to walk the MFT without touching individual directories.
+   - **FindFileScanner** — iterative BFS using `FindFirstFile`/`FindNextFile`, skipping reparse points to avoid symlink loops.
+4. Entries (name, full path, size, last-modified, attributes) are accumulated in **IndexStore** and flushed to `winindex.idx` on completion.
+
+### Search
+
+Each keystroke (after a 150 ms debounce) spawns a background `std::thread`:
+
+- **Substring mode** — the needle and each filename are lowercased once; `SimdFindSubstring` dispatches to the fastest available SIMD path at runtime.
+- **Regex mode** — filenames (or full paths in match-path mode) are converted to UTF-8 and matched with a compiled `RE2` pattern.
+- Results are capped at 10 000 and rendered in a virtual `LVS_OWNERDATA` ListView for zero-copy display.
+
+### Change monitoring
+
+After indexing, a **UsnJournalMonitor** thread tails the NTFS USN journal on each NTFS volume, replaying additions, deletions, and renames directly into the in-memory store.
+
+---
+
+## Building
+
+### Requirements
+
+| Tool | Minimum version |
+|------|----------------|
+| Windows | 10 or 11 |
+| Visual Studio Build Tools | 2022 or 2026 |
+| CMake | 3.28 |
+| Git | any recent |
+
+Third-party dependencies (**re2**, **abseil**, **GoogleTest**) are fetched automatically by CMake's `FetchContent` — no manual installation needed.
+
+### Quick build
+
+```bat
+# Debug
+build.bat debug
+
+# Release
+build.bat release
+```
+
+Or with CMake presets directly:
+
+```bat
+cmake --preset windows-msvc-release
+cmake --build --preset release
+```
+
+Binaries land in `build/release/src/ui/Release/winindex.exe`.
+
+### Running tests
+
+```bat
+cmake --preset windows-msvc-debug
+cmake --build --preset debug
+ctest --preset test-debug
+```
+
+---
+
+## Settings & configuration
+
+Settings are stored in `%APPDATA%\winindex\winindex.ini` (or next to the `.exe` in portable mode).
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `SelectedDrives` | *(chosen on first run)* | Semicolon-separated drive roots to index, e.g. `C:\;D:\` |
+| `ExcludedPaths` | See below | Pipe-separated paths excluded from indexing |
+| `ReindexIntervalHours` | `48` | Hours before the index is considered stale; `0` = manual only |
+| `UseRegex` | `0` | Enable RE2 regex search |
+| `CaseSensitive` | `0` | Case-sensitive matching |
+| `WholeWord` | `0` | Whole-word matching |
+| `MatchPath` | `0` | Match against the full path instead of filename only |
+| `IgnoreDiacritics` | `0` | Fold diacritics before matching |
+
+### Default excluded paths
+
+- `%SystemDrive%\Windows`
+- `%SystemDrive%\Program Files`
+- `%SystemDrive%\Program Files (x86)`
+- `%SystemDrive%\ProgramData`
+- `%SystemDrive%\$Recycle.Bin`
+- `%SystemDrive%\System Volume Information`
+- `%SystemDrive%\drivers`
+- `%APPDATA%` (Roaming)
+- `%LOCALAPPDATA%`
+
+These are merged into the saved exclusion list on every startup, so new defaults take effect on existing installs automatically.
+
+---
+
+## Keyboard shortcuts
+
+| Key | Action |
+|-----|--------|
+| Alt+1 | Toggle regular expression mode |
+| Alt+2 | Toggle case-sensitive |
+| Alt+3 | Toggle whole-word |
+| Alt+4 | Toggle match path |
+| Alt+5 | Toggle ignore diacritics |
+| Enter | Open selected file |
+| Ctrl+Enter | Open containing folder |
+| Ctrl+C | Copy full path(s) |
+| Ctrl+X | Cut (shell move to clipboard) |
+| Delete | Move to Recycle Bin |
+
+---
+
+## Project structure
+
+```
+winindex/
+├── src/
+│   ├── core/
+│   │   ├── indexer/        # MftScanner, FindFileScanner, Indexer, ChangeWatcher, USN journal
+│   │   ├── search/         # SearchEngine, SIMD search, RE2 integration
+│   │   ├── settings/       # Settings (INI), PathUtils
+│   │   └── storage/        # IndexStore, IndexSerializer (binary format + CRC-32)
+│   └── ui/
+│       ├── assets/         # Source icon (winindex-icon.png)
+│       ├── MainWindow.*    # Main Win32 window, search bar, result ListView
+│       ├── FirstRunDialog.*# Drive/exclusion setup on first launch
+│       ├── SettingsDialog.*# Settings accessible from Index menu
+│       └── winindex.rc     # Resources (menus, dialogs, icon)
+├── tests/                  # GoogleTest/GoogleMock unit tests
+├── .github/workflows/      # CI (build + test on every push; release packages on tags)
+├── CMakeLists.txt
+├── CMakePresets.json
+└── build.bat               # Convenience wrapper: build.bat [debug|release]
+```
+
+---
+
+## Releases
+
+Tagged releases (`v*`) trigger the CI release job which produces:
+
+- **ZIP** — portable build, extract and run
+- **NSIS installer** — installs to `Program Files`, creates a Start Menu shortcut
+
+---
+
+## License
+
+MIT
