@@ -1,0 +1,86 @@
+#include "resource.h"
+#include <windows.h>
+
+IDI_WININDEX ICON "winindex.ico"
+
+IDR_MAINMENU MENU
+BEGIN
+    POPUP "&Search"
+    BEGIN
+        MENUITEM "Regular E&xpression\tAlt+1",   ID_SEARCH_REGEX,         GRAYED
+        MENUITEM "&Case Sensitive\tAlt+2",        ID_SEARCH_CASESENSITIVE, GRAYED
+        MENUITEM "&Whole Word\tAlt+3",            ID_SEARCH_WHOLEWORD,     GRAYED
+        MENUITEM "Match &Path\tAlt+4",            ID_SEARCH_MATCHPATH,     GRAYED
+        MENUITEM "Ignore &Diacritics\tAlt+5",     ID_SEARCH_IGNOREDIACS,   GRAYED
+    END
+    POPUP "&Index"
+    BEGIN
+        MENUITEM "&Rebuild Index Now",            ID_INDEX_REBUILD
+        MENUITEM SEPARATOR
+        MENUITEM "&Settings...",                  ID_INDEX_SETTINGS
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "Open &Log File",                ID_HELP_OPENLOG
+        MENUITEM SEPARATOR
+        MENUITEM "&About winindex...",            ID_HELP_ABOUT
+    END
+END
+
+IDR_CONTEXT_MENU MENU
+BEGIN
+    POPUP ""
+    BEGIN
+        MENUITEM "&Open",                         ID_CTX_OPEN
+        MENUITEM "Open &Containing Folder",       ID_CTX_OPENDIR
+        MENUITEM SEPARATOR
+        MENUITEM "Copy Full &Path",               ID_CTX_COPYPATH
+        MENUITEM "Copy &Filename",                ID_CTX_COPYNAME
+    END
+END
+
+IDD_FIRSTRUN DIALOGEX 0, 0, 370, 285
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "winindex - First Run Setup"
+FONT 9, "Segoe UI", 400, 0, 1
+BEGIN
+    LTEXT           "Select drives to index:",-1,7,7,130,8
+    LISTBOX         IDC_DRIVE_LIST,7,18,160,56,LBS_MULTIPLESEL|LBS_NOINTEGRALHEIGHT|WS_VSCROLL|WS_TABSTOP
+
+    GROUPBOX        "Automatic Reindex",-1,7,82,356,44
+    CONTROL         "Manual only (never auto-reindex)",IDC_MANUAL_ONLY,"Button",BS_AUTOCHECKBOX|WS_TABSTOP,14,94,200,10
+    LTEXT           "Every:",-1,14,110,25,8
+    EDITTEXT        IDC_REINDEX_INTERVAL,42,108,36,12,ES_AUTOHSCROLL|ES_NUMBER
+    COMBOBOX        IDC_REINDEX_UNIT,82,108,58,50,CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP
+
+    LTEXT           "Excluded folders:",-1,7,133,80,8
+    LISTBOX         IDC_EXCL_LIST,7,144,308,68,LBS_NOINTEGRALHEIGHT|WS_VSCROLL|WS_TABSTOP
+    PUSHBUTTON      "Add...",IDC_EXCL_ADD,320,144,43,14
+    PUSHBUTTON      "Remove",IDC_EXCL_REMOVE,320,162,43,14
+
+    DEFPUSHBUTTON   "OK",IDOK,258,264,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,313,264,50,14
+END
+
+IDD_SETTINGS DIALOGEX 0, 0, 370, 285
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "winindex - Settings"
+FONT 9, "Segoe UI", 400, 0, 1
+BEGIN
+    LTEXT           "Select drives to index:",-1,7,7,130,8
+    LISTBOX         IDC_DRIVE_LIST,7,18,160,56,LBS_MULTIPLESEL|LBS_NOINTEGRALHEIGHT|WS_VSCROLL|WS_TABSTOP
+
+    GROUPBOX        "Automatic Reindex",-1,7,82,356,44
+    CONTROL         "Manual only (never auto-reindex)",IDC_MANUAL_ONLY,"Button",BS_AUTOCHECKBOX|WS_TABSTOP,14,94,200,10
+    LTEXT           "Every:",-1,14,110,25,8
+    EDITTEXT        IDC_REINDEX_INTERVAL,42,108,36,12,ES_AUTOHSCROLL|ES_NUMBER
+    COMBOBOX        IDC_REINDEX_UNIT,82,108,58,50,CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP
+
+    LTEXT           "Excluded folders:",-1,7,133,80,8
+    LISTBOX         IDC_EXCL_LIST,7,144,308,68,LBS_NOINTEGRALHEIGHT|WS_VSCROLL|WS_TABSTOP
+    PUSHBUTTON      "Add...",IDC_EXCL_ADD,320,144,43,14
+    PUSHBUTTON      "Remove",IDC_EXCL_REMOVE,320,162,43,14
+
+    DEFPUSHBUTTON   "OK",IDOK,258,264,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,313,264,50,14
+END

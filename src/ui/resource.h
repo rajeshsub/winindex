@@ -1,0 +1,49 @@
+#pragma once
+
+// Application icon
+#define IDI_WININDEX            100
+
+// Menu IDs
+#define IDR_MAINMENU            101
+
+#define ID_SEARCH_REGEX         201
+#define ID_SEARCH_CASESENSITIVE 202
+#define ID_SEARCH_WHOLEWORD     203
+#define ID_SEARCH_MATCHPATH     204
+#define ID_SEARCH_IGNOREDIACS   205
+
+#define ID_INDEX_REBUILD        301
+#define ID_INDEX_SETTINGS       302
+
+#define ID_HELP_OPENLOG         401
+#define ID_HELP_ABOUT           402
+
+// Context menu
+#define IDR_CONTEXT_MENU        501
+#define ID_CTX_OPEN             502
+#define ID_CTX_OPENDIR          503
+#define ID_CTX_COPYPATH         504
+#define ID_CTX_COPYNAME         505
+
+// Controls
+#define IDC_SEARCHBAR           1001
+#define IDC_LISTVIEW            1002
+#define IDC_STATUSBAR           1003
+
+// Dialogs
+#define IDD_FIRSTRUN            2001
+#define IDD_SETTINGS            2002
+#define IDD_ABOUT               2003
+
+// First-run dialog controls
+#define IDC_DRIVE_LIST          3001
+#define IDC_REINDEX_INTERVAL    3002
+#define IDC_REINDEX_UNIT        3003
+#define IDC_MANUAL_ONLY         3004
+#define IDC_EXCL_LIST           3005
+#define IDC_EXCL_ADD            3006
+#define IDC_EXCL_REMOVE         3007
+
+// WM_APP messages (cross-thread UI updates)
+#define WM_INDEXER_STATUS       (WM_APP + 1)
+#define WM_SEARCH_RESULTS       (WM_APP + 2)

@@ -1,0 +1,11 @@
+build/
+.cache/
+CMakeUserPresets.json
+*.user
+.vs/
+out/
+install/
+*.idx
+*.log
+build_out.txt
+build_output.txt
