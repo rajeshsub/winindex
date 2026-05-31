@@ -15,11 +15,11 @@ Blazing fast file search for Windows. winindex builds a full index of your local
 
 - **Instant search** — results appear as you type, debounced at 150 ms
 - **MFT scanning** — on NTFS drives with administrator privileges, winindex reads the Master File Table directly, indexing a full drive in seconds rather than minutes
-- **Fallback scanner** — on FAT32, exFAT, or without elevation, a fast `FindFirstFile` BFS scanner is used automatically
+- **Fallback scanner** — on FAT32, or without elevation on NTFS, a fast `FindFirstFile` BFS scanner is used automatically
 - **Regex support** — powered by [RE2](https://github.com/google/re2); toggle with Alt+1
-- **SIMD-accelerated substring search** — runtime dispatch to AVX2 → SSE4.2 → scalar fallback for substring queries
+- **SIMD-accelerated substring search** — dispatch to AVX2 or SSE4.2 when compiled with `/arch:AVX2`, scalar fallback otherwise
 - **Search modes** — case-sensitive, whole-word, match full path, ignore diacritics; all togglable from the Search menu
-- **Live change watching** — USN journal monitoring keeps the index fresh after the initial build
+- **Change detection** — USN journal replay and `ReadDirectoryChangesW` watcher are wired in and ready; live background monitoring is in active development
 - **Portable mode** — place a `winindex.ini` next to the executable and all data stays in that directory
 - **Persistent index** — the index is serialised to disk (CRC-32 validated) and loaded on startup; only rebuilt when stale or missing
 - **Context menu** — open file, open containing folder, copy full path, copy filename, cut (shell move), delete (Recycle Bin)
@@ -30,15 +30,20 @@ Blazing fast file search for Windows. winindex builds a full index of your local
 ## How it works
 
 ```
-  Indexer  ----index---->  IndexStore (memory + .idx)
-  (MFT or FindFile)               |
-       ^                          | entries
-       | USN journal              v
-  ChangeWatcher           SearchEngine (SIMD / RE2)
-                                  |
-                                  | results
-                                  v
-                           MainWindow (Win32 UI)
+  MftScanner / FindFileScanner
+           |
+           | scan
+           v
+        Indexer  ----------->  IndexStore (memory + .idx)
+                    index               |
+  UsnJournalMonitor  -------> (apply    | entries
+  ChangeWatcher       change)  changes) |
+                                        v
+                               SearchEngine (RE2 / scalar)
+                                        |
+                                        | results
+                                        v
+                                MainWindow (Win32 UI)
 ```
 
 ### Index build
@@ -60,7 +65,7 @@ Each keystroke (after a 150 ms debounce) spawns a background `std::thread`:
 
 ### Change monitoring
 
-After indexing, a **UsnJournalMonitor** thread tails the NTFS USN journal on each NTFS volume, replaying additions, deletions, and renames directly into the in-memory store.
+**UsnJournalMonitor** can replay USN journal records (additions, deletions, renames) directly into the in-memory store, and **ChangeWatcher** provides `ReadDirectoryChangesW`-based monitoring for non-NTFS volumes. Full background monitoring after the initial build is in active development.
 
 ---
 
@@ -71,7 +76,7 @@ After indexing, a **UsnJournalMonitor** thread tails the NTFS USN journal on eac
 | Tool | Minimum version |
 |------|----------------|
 | Windows | 10 or 11 |
-| Visual Studio Build Tools | 2022 or 2026 |
+| Visual Studio Build Tools | 2026 (local builds); CI auto-detects 2022+ |
 | CMake | 3.28 |
 | Git | any recent |
 
@@ -158,23 +163,24 @@ These are merged into the saved exclusion list on every startup, so new defaults
 
 ```
 winindex/
-├── src/
-│   ├── core/
-│   │   ├── indexer/        # MftScanner, FindFileScanner, Indexer, ChangeWatcher, USN journal
-│   │   ├── search/         # SearchEngine, SIMD search, RE2 integration
-│   │   ├── settings/       # Settings (INI), PathUtils
-│   │   └── storage/        # IndexStore, IndexSerializer (binary format + CRC-32)
-│   └── ui/
-│       ├── assets/         # Source icon (winindex-icon.png)
-│       ├── MainWindow.*    # Main Win32 window, search bar, result ListView
-│       ├── FirstRunDialog.*# Drive/exclusion setup on first launch
-│       ├── SettingsDialog.*# Settings accessible from Index menu
-│       └── winindex.rc     # Resources (menus, dialogs, icon)
-├── tests/                  # GoogleTest/GoogleMock unit tests
-├── .github/workflows/      # CI (build + test on every push; release packages on tags)
-├── CMakeLists.txt
-├── CMakePresets.json
-└── build.bat               # Convenience wrapper: build.bat [debug|release]
+  src/
+    core/
+      indexer/      MftScanner, FindFileScanner, Indexer, ChangeWatcher, USN journal
+      search/       SearchEngine, SIMD search, RE2 integration
+      settings/     Settings (INI), PathUtils
+      storage/      IndexStore, IndexSerializer (binary format + CRC-32)
+    ui/
+      assets/       Source icon and screenshot
+      MainWindow.*  Main Win32 window, search bar, result ListView
+      FirstRunDialog.*  Drive/exclusion setup on first launch
+      SettingsDialog.*  Settings accessible from Index menu
+      winindex.rc   Resources (menus, dialogs, icon)
+  tests/            GoogleTest/GoogleMock unit tests
+  .github/
+    workflows/      CI: build+test on every push; release packages on tags
+  CMakeLists.txt
+  CMakePresets.json
+  build.bat         Convenience wrapper: build.bat [debug|release]
 ```
 
 ---
