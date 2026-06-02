@@ -185,15 +185,6 @@ winindex/
 
 ---
 
-## Releases
-
-Tagged releases (`v*`) trigger the CI release job which produces:
-
-- **ZIP** — portable build, extract and run
-- **NSIS installer** — installs to `Program Files`, creates a Start Menu shortcut
-
----
-
 ## License
 
 MIT
