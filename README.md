@@ -18,6 +18,7 @@ Blazing fast file search for Windows. winindex builds a full index of your local
 - **Fallback scanner** — on FAT32, or without elevation on NTFS, a fast `FindFirstFile` BFS scanner is used automatically
 - **Regex support** — powered by [RE2](https://github.com/google/re2); toggle with Alt+1
 - **SIMD-accelerated substring search** — dispatch to AVX2 or SSE4.2 when compiled with `/arch:AVX2`, scalar fallback otherwise
+- **Word-level matching** — queries with spaces, underscores, or hyphens match filenames by token set, so `just rosy guitar` finds `LedZep_Just-Rosy_June-Bug_guitar.flac` even though the words are non-adjacent and separated by different delimiters
 - **Search modes** — case-sensitive, whole-word, match full path, ignore diacritics; all togglable from the Search menu
 - **Change detection** — USN journal replay and `ReadDirectoryChangesW` watcher are wired in and ready; live background monitoring is in active development
 - **Portable mode** — place a `winindex.ini` next to the executable and all data stays in that directory
@@ -60,6 +61,7 @@ Blazing fast file search for Windows. winindex builds a full index of your local
 Each keystroke (after a 150 ms debounce) spawns a background `std::thread`:
 
 - **Substring mode** — the needle and each filename are lowercased once; `SimdFindSubstring` dispatches to the fastest available SIMD path at runtime.
+- **Token-set mode** — when the query contains a separator character (space, `_`, `-`, `.`), both the query and each filename are split into tokens and the file matches if every query token appears somewhere in the filename token set. This lets `just rosy guitar` match `LedZep_Just-Rosy_June-Bug_guitar.flac` without regex. Single-word queries skip this path entirely, keeping the SIMD fast path.
 - **Regex mode** — filenames (or full paths in match-path mode) are converted to UTF-8 and matched with a compiled `RE2` pattern.
 - Results are capped at 10 000 and rendered in a virtual `LVS_OWNERDATA` ListView for zero-copy display.
 
@@ -75,7 +77,7 @@ Each keystroke (after a 150 ms debounce) spawns a background `std::thread`:
 
 | Tool | Minimum version |
 |------|----------------|
-| Windows | 10 or 11 |
+| Windows | 10 or above |
 | Visual Studio Build Tools | 2026 (local builds); CI auto-detects 2022+ |
 | CMake | 3.28 |
 | Git | any recent |
@@ -138,7 +140,7 @@ Settings are stored in `%APPDATA%\winindex\winindex.ini` (or next to the `.exe` 
 - `%APPDATA%` (Roaming)
 - `%LOCALAPPDATA%`
 
-These are merged into the saved exclusion list on every startup, so new defaults take effect on existing installs automatically.
+These are applied as the initial default on a new install. Once a user has saved their own exclusion list, that list is used as-is and the defaults are not re-injected.
 
 ---
 
@@ -166,7 +168,7 @@ winindex/
   src/
     core/
       indexer/      MftScanner, FindFileScanner, Indexer, ChangeWatcher, USN journal
-      search/       SearchEngine, SIMD search, RE2 integration
+      search/       SearchEngine, SIMD search, RE2 integration, TokenMatcher (word-level matching)
       settings/     Settings (INI), PathUtils
       storage/      IndexStore, IndexSerializer (binary format + CRC-32)
     ui/

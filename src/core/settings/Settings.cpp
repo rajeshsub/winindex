@@ -41,9 +41,7 @@ void Settings::Load() {
                 m_selectedDrives.push_back(token);
     }
 
-    // Excluded paths: load user-configured list, then merge in system defaults.
-    // System defaults (AppData, Windows, etc.) are always enforced so that
-    // adding new defaults in a code update takes effect on existing installs.
+    // Excluded paths: use saved list if present, otherwise seed with defaults.
     std::wstring exclStr = ReadString(L"Indexing", L"ExcludedPaths");
     if (exclStr.empty()) {
         m_excludedPaths = DefaultExcludedPaths();
@@ -54,20 +52,6 @@ void Settings::Load() {
         while (std::getline(ss, token, L'|'))
             if (!token.empty())
                 m_excludedPaths.push_back(token);
-
-        // Merge in any defaults not already present so new defaults take effect
-        // on existing installs without requiring a manual settings reset.
-        for (const auto& def : DefaultExcludedPaths()) {
-            bool found = false;
-            for (const auto& e : m_excludedPaths) {
-                if (_wcsicmp(e.c_str(), def.c_str()) == 0) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found)
-                m_excludedPaths.push_back(def);
-        }
     }
 
     m_reindexIntervalHours = static_cast<uint64_t>(

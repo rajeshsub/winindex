@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+
 #include "settings/Settings.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -53,10 +54,10 @@ TEST_F(SettingsTest, ManualOnlyPersists) {
 TEST_F(SettingsTest, SearchOptionsPersist) {
     settings->Load();
     SearchOptions opts{};
-    opts.useRegex      = true;
+    opts.useRegex = true;
     opts.caseSensitive = true;
-    opts.wholeWord     = false;
-    opts.matchPath     = true;
+    opts.wholeWord = false;
+    opts.matchPath = true;
     opts.ignoreDiacritics = false;
     settings->SetSearchOptions(opts);
     settings->Save();
@@ -73,7 +74,7 @@ TEST_F(SettingsTest, SearchOptionsPersist) {
 
 TEST_F(SettingsTest, SelectedDrivesPersist) {
     settings->Load();
-    settings->SetSelectedDrives({ L"C:\\", L"D:\\" });
+    settings->SetSelectedDrives({L"C:\\", L"D:\\"});
     settings->Save();
 
     Settings s2(true, tmpDir);
@@ -86,7 +87,7 @@ TEST_F(SettingsTest, SelectedDrivesPersist) {
 
 TEST_F(SettingsTest, ExcludedPathsPersist) {
     settings->Load();
-    settings->SetExcludedPaths({ L"C:\\Windows", L"C:\\Program Files" });
+    settings->SetExcludedPaths({L"C:\\Windows", L"C:\\Program Files"});
     settings->Save();
 
     Settings s2(true, tmpDir);

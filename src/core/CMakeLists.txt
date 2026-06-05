@@ -7,6 +7,7 @@ add_library(winindex_core STATIC
     indexer/Indexer.cpp
     search/SearchEngine.cpp
     search/SimdSearch.cpp
+    search/TokenMatcher.cpp
     storage/IndexStore.cpp
     storage/IndexSerializer.cpp
     settings/Settings.cpp
