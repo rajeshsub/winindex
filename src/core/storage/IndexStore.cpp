@@ -94,6 +94,8 @@ void IndexStore::ApplyRename(const std::wstring& oldPath, const std::wstring& ne
             e.path = newPath;
             size_t slash = newPath.rfind(L'\\');
             e.name = (slash != std::wstring::npos) ? newPath.substr(slash + 1) : newPath;
+            e.nameLower = e.name;
+            std::transform(e.nameLower.begin(), e.nameLower.end(), e.nameLower.begin(), ::towlower);
             break;
         }
     }

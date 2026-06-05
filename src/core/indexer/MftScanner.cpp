@@ -130,6 +130,8 @@ bool MftScanner::ScanVolume(const std::wstring& root,
 
         FileEntry fe;
         fe.name         = entry.name;
+        fe.nameLower    = fe.name;
+        std::transform(fe.nameLower.begin(), fe.nameLower.end(), fe.nameLower.begin(), ::towlower);
         fe.path         = full;
         fe.size         = entry.size;
         fe.lastModified = entry.lastModified;

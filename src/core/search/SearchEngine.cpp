@@ -74,6 +74,11 @@ std::vector<SearchResult> SearchEngine::SearchRegex(
     RE2 re(utf8Query, re2opts);
     if (!re.ok()) return {}; // Invalid regex — return empty
 
+    // Capture-group version used only for whole-word boundary checks.
+    // RE2::PartialMatch with a StringPiece* arg returns false if the pattern
+    // has no capture groups, so we keep the plain boolean call as the primary path.
+    RE2 reCapture("(" + utf8Query + ")", re2opts);
+
     std::vector<SearchResult> results;
     results.reserve(maxResults);
 
@@ -82,13 +87,14 @@ std::vector<SearchResult> SearchEngine::SearchRegex(
         const std::wstring& target = options.matchPath ? e.path : e.name;
 
         std::string utf8Target = WideToUtf8(target);
-        re2::StringPiece match;
-        if (!RE2::PartialMatch(utf8Target, re, &match)) continue;
 
         if (options.wholeWord) {
-            // Convert match offset back to wchar position (approximate for ASCII-range)
+            re2::StringPiece match;
+            if (!reCapture.ok() || !RE2::PartialMatch(utf8Target, reCapture, &match)) continue;
             size_t matchPos = static_cast<size_t>(match.data() - utf8Target.data());
             if (!MatchesWholeWord(target, matchPos, match.size())) continue;
+        } else {
+            if (!RE2::PartialMatch(utf8Target, re)) continue;
         }
 
         SearchResult sr;
@@ -129,26 +135,45 @@ std::vector<SearchResult> SearchEngine::SearchSubstring(
 
         futures.push_back(std::async(std::launch::async,
             [&, begin, end]() -> std::vector<SearchResult> {
+                // Thread-local buffer for matchPath case-insensitive (avoids per-entry alloc)
+                thread_local std::wstring tlsPathBuf;
+
                 std::vector<SearchResult> local;
                 for (uint64_t i = begin; i < end; ++i) {
                     if (cancelToken.load(std::memory_order_relaxed)) break;
 
                     const FileEntry& e = entries[i];
-                    const std::wstring& target = options.matchPath ? e.path : e.name;
 
-                    std::wstring haystack = options.caseSensitive ? target : [&]{
-                        std::wstring h = target;
-                        std::transform(h.begin(), h.end(), h.begin(), ::towlower);
-                        return h;
-                    }();
+                    // Hot path: name search uses pre-lowercased nameLower — zero allocation
+                    const wchar_t* haystackData;
+                    size_t         haystackLen;
+                    if (options.matchPath) {
+                        if (options.caseSensitive) {
+                            haystackData = e.path.c_str();
+                            haystackLen  = e.path.size();
+                        } else {
+                            tlsPathBuf.assign(e.path.begin(), e.path.end());
+                            std::transform(tlsPathBuf.begin(), tlsPathBuf.end(),
+                                           tlsPathBuf.begin(), ::towlower);
+                            haystackData = tlsPathBuf.c_str();
+                            haystackLen  = tlsPathBuf.size();
+                        }
+                    } else {
+                        const std::wstring& hay = options.caseSensitive ? e.name : e.nameLower;
+                        haystackData = hay.c_str();
+                        haystackLen  = hay.size();
+                    }
 
-                    size_t pos = SimdFindSubstring(
-                        haystack.c_str(), haystack.size(),
-                        needle.c_str(),   needle.size());
-
+                    size_t pos = SimdFindSubstring(haystackData, haystackLen,
+                                                   needle.c_str(), needle.size());
                     if (pos == std::wstring::npos) continue;
-                    if (options.wholeWord && !MatchesWholeWord(haystack, pos, needle.size()))
-                        continue;
+
+                    if (options.wholeWord) {
+                        // Reconstruct wstring view for word-boundary check
+                        std::wstring_view hayView(haystackData, haystackLen);
+                        if (!MatchesWholeWord(std::wstring(hayView), pos, needle.size()))
+                            continue;
+                    }
 
                     SearchResult sr;
                     sr.entry      = &e;
