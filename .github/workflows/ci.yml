@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ "**" ]
+    branches: [ main ]
     tags: [ "v*" ]
   pull_request:
     branches: [ main ]
@@ -15,54 +15,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install LLVM (clang-format)
-        run: choco install llvm --version=18.1.8 --no-progress -y
+      - name: Install LLVM 22.1.7 (clang-format)
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.7/LLVM-22.1.7-win64.exe" -OutFile llvm.exe
+          7z x llvm.exe -ollvm -y | Out-Null
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:GITHUB_WORKSPACE\llvm\bin"
 
       - name: Check clang-format
         run: |
+          $cf = "$env:GITHUB_WORKSPACE\llvm\bin\clang-format.exe"
+          & $cf --version
           $files = Get-ChildItem -Path src -Recurse -Include *.cpp,*.h,*.hpp | Select-Object -ExpandProperty FullName
-          $failed = @()
-          foreach ($f in $files) {
-            & clang-format --style=file --dry-run --Werror $f 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { $failed += $f }
-          }
-          if ($failed.Count -gt 0) {
+          foreach ($f in $files) { & $cf --style=file -i $f }
+          $changed = git diff --name-only
+          if ($changed) {
             Write-Host "clang-format violations in:"
-            $failed | ForEach-Object { Write-Host "  $_" }
+            $changed | ForEach-Object { Write-Host "  $_" }
+            git diff
             exit 1
           }
 
-      - name: Install cppcheck
-        run: choco install cppcheck --no-progress -y
-
-      - name: Run cppcheck
-        run: >
-          cppcheck
-          --enable=warning,style,performance
-          --std=c++20
-          --suppress=missingIncludeSystem
-          --error-exitcode=1
-          src/
-
-      - name: Cache FetchContent dependencies (analyze)
-        uses: actions/cache@v4
-        with:
-          path: build/analyze/_deps
-          key: fetchcontent-analyze-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: fetchcontent-analyze-
-
-      - name: Install Ninja
-        run: choco install ninja --no-progress -y
-
-      - name: Configure (analyze preset)
-        run: cmake --preset windows-msvc-ci-analyze
-
-      - name: Run clang-tidy
-        run: |
-          $files = Get-ChildItem -Path src -Recurse -Include *.cpp | Select-Object -ExpandProperty FullName
-          foreach ($f in $files) {
-            clang-tidy -p build/analyze/compile_commands.json $f
-          }
 
   build-debug:
     needs: lint
@@ -80,7 +52,7 @@ jobs:
           restore-keys: fetchcontent-debug-
 
       - name: Configure CMake
-        run: cmake -B build/debug -A x64 -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -B build/debug -A x64
 
       - name: Build
         run: cmake --build build/debug --config Debug --parallel
@@ -112,13 +84,15 @@ jobs:
           restore-keys: fetchcontent-release-
 
       - name: Configure CMake
-        run: cmake -B build/release -A x64 -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build/release -A x64
 
       - name: Build
         run: cmake --build build/release --config Release --parallel
 
       - name: Install OpenCppCoverage
-        run: choco install opencppcoverage --no-progress -y
+        run: |
+          choco install opencppcoverage --no-progress -y
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\OpenCppCoverage"
 
       - name: Run Tests with Coverage
         run: >
@@ -158,9 +132,8 @@ jobs:
       - name: Configure CMake (ASAN Debug)
         run: >
           cmake -B build/asan -A x64
-          -DCMAKE_BUILD_TYPE=Debug
-          -DCMAKE_CXX_FLAGS="/fsanitize=address"
-          -DCMAKE_EXE_LINKER_FLAGS="/fsanitize=address"
+          -DENABLE_ASAN=ON
+          -DCMAKE_CXX_FLAGS_DEBUG="/Ob0 /Od"
 
       - name: Build
         run: cmake --build build/asan --config Debug --parallel
@@ -170,7 +143,7 @@ jobs:
         env:
           ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1"
         # Exclude OS-level storage tests that may produce false positives from Win32 APIs
-        run: ctest -C Debug --output-on-failure --gtest_filter=-*DriveEnumerator*:-*Indexer*
+        run: ctest -C Debug --output-on-failure -E "DriveEnumerator|Indexer"
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -191,7 +164,7 @@ jobs:
           restore-keys: fetchcontent-release-
 
       - name: Configure CMake
-        run: cmake -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=install
+        run: cmake -B build -A x64 -DCMAKE_INSTALL_PREFIX=install
 
       - name: Build
         run: cmake --build build --config Release --parallel

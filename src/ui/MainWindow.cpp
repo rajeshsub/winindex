@@ -1,16 +1,18 @@
 #include "MainWindow.h"
+
+#include <commctrl.h>
+#include <shellapi.h>
+#include <shlobj.h>
+#include <shlwapi.h>
+#include <windowsx.h>
+
+#include "../core/indexer/FindFileScanner.h"
+#include "../core/indexer/MftScanner.h"
+#include "../core/indexer/UsnJournalMonitor.h"
+#include "../core/settings/Logger.h"
+#include "../core/settings/PathUtils.h"
 #include "FirstRunDialog.h"
 #include "SettingsDialog.h"
-#include "../core/indexer/MftScanner.h"
-#include "../core/indexer/FindFileScanner.h"
-#include "../core/indexer/UsnJournalMonitor.h"
-#include "../core/settings/PathUtils.h"
-#include "../core/settings/Logger.h"
-#include <shellapi.h>
-#include <shlwapi.h>
-#include <shlobj.h>
-#include <commctrl.h>
-#include <windowsx.h>
 #include <algorithm>
 
 #pragma comment(lib, "comctl32.lib")
@@ -21,52 +23,51 @@ namespace winindex {
 
 bool MainWindow::Register(HINSTANCE hInst) {
     WNDCLASSEXW wc{};
-    wc.cbSize        = sizeof(wc);
-    wc.style         = CS_HREDRAW | CS_VREDRAW;
-    wc.lpfnWndProc   = WndProc;
-    wc.hInstance     = hInst;
-    wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
+    wc.cbSize = sizeof(wc);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = hInst;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-    wc.lpszMenuName  = MAKEINTRESOURCEW(IDR_MAINMENU);
+    wc.lpszMenuName = MAKEINTRESOURCEW(IDR_MAINMENU);
     wc.lpszClassName = kClassName;
-    wc.hIcon   = static_cast<HICON>(LoadImageW(hInst, MAKEINTRESOURCEW(IDI_WININDEX),
-                     IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR));
-    wc.hIconSm = static_cast<HICON>(LoadImageW(hInst, MAKEINTRESOURCEW(IDI_WININDEX),
-                     IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR));
+    wc.hIcon = static_cast<HICON>(
+        LoadImageW(hInst, MAKEINTRESOURCEW(IDI_WININDEX), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR));
+    wc.hIconSm = static_cast<HICON>(
+        LoadImageW(hInst, MAKEINTRESOURCEW(IDI_WININDEX), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR));
     return RegisterClassExW(&wc) != 0;
 }
 
 HWND MainWindow::Create(HINSTANCE hInst) {
-    return CreateWindowExW(0, kClassName, L"winindex",
-                            WS_OVERLAPPEDWINDOW,
-                            CW_USEDEFAULT, CW_USEDEFAULT, 900, 600,
-                            nullptr, nullptr, hInst, nullptr);
+    return CreateWindowExW(0, kClassName, L"winindex", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
+                           CW_USEDEFAULT, 900, 600, nullptr, nullptr, hInst, nullptr);
 }
 
 MainWindow::MainWindow(HWND hwnd) : m_hwnd(hwnd) {}
 
 MainWindow::~MainWindow() {
     m_searchCancel.store(true);
-    if (m_searchThread.joinable()) m_searchThread.join();
+    if (m_searchThread.joinable())
+        m_searchThread.join();
 }
 
 void MainWindow::OnCreate() {
     bool portable = IsPortableMode();
     std::wstring exeDir = GetExeDirectory();
 
-    m_settings    = std::make_shared<Settings>(portable, exeDir);
+    m_settings = std::make_shared<Settings>(portable, exeDir);
     m_settings->Load();
     Logger::Instance().Init(m_settings->GetDataDirectory() + L"\\winindex.log");
     Logger::Instance().Log(L"Application started.");
-    m_indexStore  = std::make_shared<IndexStore>(m_settings);
-    m_searchEngine= std::make_shared<SearchEngine>();
+    m_indexStore = std::make_shared<IndexStore>(m_settings);
+    m_searchEngine = std::make_shared<SearchEngine>();
 
-    auto mftScanner  = std::make_shared<MftScanner>();
+    auto mftScanner = std::make_shared<MftScanner>();
     auto findScanner = std::make_shared<FindFileScanner>();
-    auto usnMonitor  = std::make_shared<UsnJournalMonitor>();
+    auto usnMonitor = std::make_shared<UsnJournalMonitor>();
 
-    m_indexer = std::make_shared<Indexer>(mftScanner, findScanner,
-                                           usnMonitor, m_indexStore, m_settings);
+    m_indexer =
+        std::make_shared<Indexer>(mftScanner, findScanner, usnMonitor, m_indexStore, m_settings);
 
     m_indexer->SetStatusCallback([hwnd = m_hwnd](const IndexerStatus& s) {
         auto* copy = new IndexerStatus(s);
@@ -89,58 +90,59 @@ void MainWindow::OnCreate() {
 
 void MainWindow::InitControls() {
     // Search bar (edit control)
-    m_hSearchBar = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
-        0, 0, 0, 0, m_hwnd,
+    m_hSearchBar = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, m_hwnd,
         reinterpret_cast<HMENU>(IDC_SEARCHBAR),
-        reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(m_hwnd, GWLP_HINSTANCE)),
-        nullptr);
+        reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(m_hwnd, GWLP_HINSTANCE)), nullptr);
 
     // Apply a larger font to search bar
-    HFONT hFont = CreateFontW(20, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                               CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                               DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    HFONT hFont = CreateFontW(20, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                              OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                              DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     SendMessageW(m_hSearchBar, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
 
     // ListView (virtual, owner-data)
-    m_hListView = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
-        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_OWNERDATA |
-        LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
-        0, 0, 0, 0, m_hwnd,
-        reinterpret_cast<HMENU>(IDC_LISTVIEW),
-        reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(m_hwnd, GWLP_HINSTANCE)),
-        nullptr);
+    m_hListView = CreateWindowExW(
+        WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_OWNERDATA | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
+        0, 0, 0, 0, m_hwnd, reinterpret_cast<HMENU>(IDC_LISTVIEW),
+        reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(m_hwnd, GWLP_HINSTANCE)), nullptr);
 
-    ListView_SetExtendedListViewStyle(m_hListView,
-        LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_HEADERDRAGDROP);
+    ListView_SetExtendedListViewStyle(
+        m_hListView, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_HEADERDRAGDROP);
 
     // Columns
     LVCOLUMNW col{};
     col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
 
-    col.pszText = const_cast<LPWSTR>(L"Name");  col.cx = 250; col.fmt = LVCFMT_LEFT;
+    col.pszText = const_cast<LPWSTR>(L"Name");
+    col.cx = 250;
+    col.fmt = LVCFMT_LEFT;
     ListView_InsertColumn(m_hListView, 0, &col);
-    col.pszText = const_cast<LPWSTR>(L"Path");  col.cx = 350;
+    col.pszText = const_cast<LPWSTR>(L"Path");
+    col.cx = 350;
     ListView_InsertColumn(m_hListView, 1, &col);
-    col.pszText = const_cast<LPWSTR>(L"Size");  col.cx = 90; col.fmt = LVCFMT_RIGHT;
+    col.pszText = const_cast<LPWSTR>(L"Size");
+    col.cx = 90;
+    col.fmt = LVCFMT_RIGHT;
     ListView_InsertColumn(m_hListView, 2, &col);
-    col.pszText = const_cast<LPWSTR>(L"Date Modified"); col.cx = 140; col.fmt = LVCFMT_LEFT;
+    col.pszText = const_cast<LPWSTR>(L"Date Modified");
+    col.cx = 140;
+    col.fmt = LVCFMT_LEFT;
     ListView_InsertColumn(m_hListView, 3, &col);
 
     // Status bar
-    m_hStatusBar = CreateWindowExW(0, STATUSCLASSNAMEW, L"",
-        WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP,
-        0, 0, 0, 0, m_hwnd,
+    m_hStatusBar = CreateWindowExW(
+        0, STATUSCLASSNAMEW, L"", WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP, 0, 0, 0, 0, m_hwnd,
         reinterpret_cast<HMENU>(IDC_STATUSBAR),
-        reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(m_hwnd, GWLP_HINSTANCE)),
-        nullptr);
+        reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(m_hwnd, GWLP_HINSTANCE)), nullptr);
 
     SetStatusText(L"Ready.");
 }
 
 void MainWindow::OnSize(int cx, int cy) {
-    if (!m_hSearchBar || !m_hListView || !m_hStatusBar) return;
+    if (!m_hSearchBar || !m_hListView || !m_hStatusBar)
+        return;
 
     constexpr int kSearchBarHeight = 32;
     constexpr int kSearchBarPadding = 4;
@@ -151,8 +153,8 @@ void MainWindow::OnSize(int cx, int cy) {
     GetWindowRect(m_hStatusBar, &sbRect);
     int sbHeight = sbRect.bottom - sbRect.top;
 
-    MoveWindow(m_hSearchBar, kSearchBarPadding, kSearchBarPadding,
-               cx - kSearchBarPadding * 2, kSearchBarHeight, TRUE);
+    MoveWindow(m_hSearchBar, kSearchBarPadding, kSearchBarPadding, cx - kSearchBarPadding * 2,
+               kSearchBarHeight, TRUE);
 
     int listTop = kSearchBarHeight + kSearchBarPadding * 2;
     MoveWindow(m_hListView, 0, listTop, cx, cy - listTop - sbHeight, TRUE);
@@ -160,22 +162,22 @@ void MainWindow::OnSize(int cx, int cy) {
 
 void MainWindow::UpdateMenuCheckmarks() {
     HMENU hMenu = GetMenu(m_hwnd);
-    if (!hMenu) return;
+    if (!hMenu)
+        return;
     auto opts = m_settings->GetSearchOptions();
 
     auto check = [&](UINT id, bool checked) {
         CheckMenuItem(hMenu, id, MF_BYCOMMAND | (checked ? MF_CHECKED : MF_UNCHECKED));
     };
-    check(ID_SEARCH_REGEX,         opts.useRegex);
+    check(ID_SEARCH_REGEX, opts.useRegex);
     check(ID_SEARCH_CASESENSITIVE, opts.caseSensitive);
-    check(ID_SEARCH_WHOLEWORD,     opts.wholeWord);
-    check(ID_SEARCH_MATCHPATH,     opts.matchPath);
-    check(ID_SEARCH_IGNOREDIACS,   opts.ignoreDiacritics);
+    check(ID_SEARCH_WHOLEWORD, opts.wholeWord);
+    check(ID_SEARCH_MATCHPATH, opts.matchPath);
+    check(ID_SEARCH_IGNOREDIACS, opts.ignoreDiacritics);
 
     // Enable menu items now that we're ready
     HMENU hSearchMenu = GetSubMenu(hMenu, 0);
-    for (int i = 0; i < 5; ++i)
-        EnableMenuItem(hSearchMenu, i, MF_BYPOSITION | MF_ENABLED);
+    for (int i = 0; i < 5; ++i) EnableMenuItem(hSearchMenu, i, MF_BYPOSITION | MF_ENABLED);
 }
 
 void MainWindow::OnCommand(WORD id) {
@@ -190,11 +192,21 @@ void MainWindow::OnCommand(WORD id) {
     };
 
     switch (id) {
-        case ID_SEARCH_REGEX:         toggleOpt(opts.useRegex);         break;
-        case ID_SEARCH_CASESENSITIVE: toggleOpt(opts.caseSensitive);    break;
-        case ID_SEARCH_WHOLEWORD:     toggleOpt(opts.wholeWord);        break;
-        case ID_SEARCH_MATCHPATH:     toggleOpt(opts.matchPath);        break;
-        case ID_SEARCH_IGNOREDIACS:   toggleOpt(opts.ignoreDiacritics); break;
+        case ID_SEARCH_REGEX:
+            toggleOpt(opts.useRegex);
+            break;
+        case ID_SEARCH_CASESENSITIVE:
+            toggleOpt(opts.caseSensitive);
+            break;
+        case ID_SEARCH_WHOLEWORD:
+            toggleOpt(opts.wholeWord);
+            break;
+        case ID_SEARCH_MATCHPATH:
+            toggleOpt(opts.matchPath);
+            break;
+        case ID_SEARCH_IGNOREDIACS:
+            toggleOpt(opts.ignoreDiacritics);
+            break;
 
         case ID_INDEX_REBUILD:
             m_indexer->StartIndexing(true);
@@ -212,15 +224,14 @@ void MainWindow::OnCommand(WORD id) {
         case ID_HELP_OPENLOG: {
             std::wstring log = m_settings->GetDataDirectory() + L"\\winindex.log";
             // Ensure file exists before asking the shell to open it
-            HANDLE h = CreateFileW(log.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
-                                    nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-            if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
-            HINSTANCE r = ShellExecuteW(m_hwnd, L"open", log.c_str(),
-                                         nullptr, nullptr, SW_SHOW);
+            HANDLE h = CreateFileW(log.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                   OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (h != INVALID_HANDLE_VALUE)
+                CloseHandle(h);
+            HINSTANCE r = ShellExecuteW(m_hwnd, L"open", log.c_str(), nullptr, nullptr, SW_SHOW);
             if (reinterpret_cast<INT_PTR>(r) <= 32) {
-                MessageBoxW(m_hwnd,
-                    (L"Could not open log file:\n" + log).c_str(),
-                    L"winindex", MB_OK | MB_ICONWARNING);
+                MessageBoxW(m_hwnd, (L"Could not open log file:\n" + log).c_str(), L"winindex",
+                            MB_OK | MB_ICONWARNING);
             }
             break;
         }
@@ -229,10 +240,18 @@ void MainWindow::OnCommand(WORD id) {
             ShowAbout();
             break;
 
-        case ID_CTX_OPEN:       OpenSelectedFile();             break;
-        case ID_CTX_OPENDIR:    OpenContainingFolder();         break;
-        case ID_CTX_COPYPATH:   CopySelectedPaths(false);       break;
-        case ID_CTX_COPYNAME:   CopySelectedPaths(true);        break;
+        case ID_CTX_OPEN:
+            OpenSelectedFile();
+            break;
+        case ID_CTX_OPENDIR:
+            OpenContainingFolder();
+            break;
+        case ID_CTX_COPYPATH:
+            CopySelectedPaths(false);
+            break;
+        case ID_CTX_COPYNAME:
+            CopySelectedPaths(true);
+            break;
     }
 }
 
@@ -246,9 +265,8 @@ void MainWindow::OnSearchChanged() {
     if (query.size() < 2) {
         m_currentResults.clear();
         ListView_SetItemCount(m_hListView, 0);
-        SetStatusText(query.empty()
-            ? L"Enter a search term to begin."
-            : L"Type at least 2 characters to search...");
+        SetStatusText(query.empty() ? L"Enter a search term to begin."
+                                    : L"Type at least 2 characters to search...");
         return;
     }
 
@@ -259,21 +277,23 @@ void MainWindow::TriggerSearch() {
     wchar_t buf[1024]{};
     GetWindowTextW(m_hSearchBar, buf, static_cast<int>(std::size(buf)));
     std::wstring query(buf);
-    if (query.size() >= 2) ExecuteSearch(query);
+    if (query.size() >= 2)
+        ExecuteSearch(query);
 }
 
 void MainWindow::ExecuteSearch(std::wstring query) {
     m_searchCancel.store(true);
-    if (m_searchThread.joinable()) m_searchThread.join();
+    if (m_searchThread.joinable())
+        m_searchThread.join();
     m_searchCancel.store(false);
 
-    auto* results    = new std::vector<SearchResult>();
-    auto  entries    = m_indexStore->GetEntries();
-    auto  count      = m_indexStore->GetEntryCount();
-    auto  opts       = m_settings->GetSearchOptions();
-    auto  engine     = m_searchEngine;
-    auto& cancelRef  = m_searchCancel;
-    HWND  hwnd       = m_hwnd;
+    auto* results = new std::vector<SearchResult>();
+    auto entries = m_indexStore->GetEntries();
+    auto count = m_indexStore->GetEntryCount();
+    auto opts = m_settings->GetSearchOptions();
+    auto engine = m_searchEngine;
+    auto& cancelRef = m_searchCancel;
+    HWND hwnd = m_hwnd;
 
     m_searchThread = std::thread([=, &cancelRef]() mutable {
         *results = engine->Search(query, entries, count, opts, 10000, cancelRef);
@@ -282,7 +302,7 @@ void MainWindow::ExecuteSearch(std::wstring query) {
 }
 
 void MainWindow::OnSearchResults(std::vector<SearchResult>* results) {
-    m_totalMatches = results->size(); // simplified; actual total would need separate count pass
+    m_totalMatches = results->size();  // simplified; actual total would need separate count pass
     m_currentResults = std::move(*results);
     delete results;
 
@@ -302,8 +322,8 @@ void MainWindow::OnSearchResults(std::vector<SearchResult>* results) {
 void MainWindow::OnIndexerStatus(const IndexerStatus& status) {
     Logger::Instance().Log(status.message);
 
-    bool hasIndex = (status.state == IndexerState::WatchingForChanges ||
-                     status.state == IndexerState::Idle);
+    bool hasIndex =
+        (status.state == IndexerState::WatchingForChanges || status.state == IndexerState::Idle);
     EnableWindow(m_hSearchBar, hasIndex ? TRUE : FALSE);
     if (!hasIndex) {
         ListView_SetItemCount(m_hListView, 0);
@@ -313,26 +333,33 @@ void MainWindow::OnIndexerStatus(const IndexerStatus& status) {
 
 void MainWindow::OnListDblClick() {
     int sel = ListView_GetNextItem(m_hListView, -1, LVNI_SELECTED);
-    if (sel < 0 || sel >= static_cast<int>(m_currentResults.size())) return;
+    if (sel < 0 || sel >= static_cast<int>(m_currentResults.size()))
+        return;
     const FileEntry* entry = m_currentResults[sel].entry;
-    if (!PreCheckFileExists(entry)) return;
+    if (!PreCheckFileExists(entry))
+        return;
     ShellExecuteW(m_hwnd, L"open", entry->path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
 void MainWindow::OnListKeyDown(NMLVKEYDOWN* kd) {
-    if (!kd) return;
+    if (!kd)
+        return;
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
 
     switch (kd->wVKey) {
         case VK_RETURN:
-            if (ctrl) OpenContainingFolder();
-            else      OpenSelectedFile();
+            if (ctrl)
+                OpenContainingFolder();
+            else
+                OpenSelectedFile();
             break;
         case 'C':
-            if (ctrl) CopySelectedPaths(false);
+            if (ctrl)
+                CopySelectedPaths(false);
             break;
         case 'X':
-            if (ctrl) CutSelectedFiles();
+            if (ctrl)
+                CutSelectedFiles();
             break;
         case VK_DELETE:
             DeleteSelectedFiles();
@@ -341,13 +368,14 @@ void MainWindow::OnListKeyDown(NMLVKEYDOWN* kd) {
 }
 
 void MainWindow::OnContextMenu(HWND hwndFrom, int x, int y) {
-    if (hwndFrom != m_hListView) return;
+    if (hwndFrom != m_hListView)
+        return;
     int sel = ListView_GetNextItem(m_hListView, -1, LVNI_SELECTED);
-    if (sel < 0) return;
+    if (sel < 0)
+        return;
 
-    HMENU hBase = LoadMenuW(
-        reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(m_hwnd, GWLP_HINSTANCE)),
-        MAKEINTRESOURCEW(IDR_CONTEXT_MENU));
+    HMENU hBase = LoadMenuW(reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(m_hwnd, GWLP_HINSTANCE)),
+                            MAKEINTRESOURCEW(IDR_CONTEXT_MENU));
     HMENU hPop = GetSubMenu(hBase, 0);
 
     int selCount = ListView_GetSelectedCount(m_hListView);
@@ -361,32 +389,38 @@ void MainWindow::OnContextMenu(HWND hwndFrom, int x, int y) {
 }
 
 bool MainWindow::PreCheckFileExists(const FileEntry* entry) {
-    if (GetFileAttributesW(entry->path.c_str()) != INVALID_FILE_ATTRIBUTES) return true;
+    if (GetFileAttributesW(entry->path.c_str()) != INVALID_FILE_ATTRIBUTES)
+        return true;
 
-    std::wstring msg = L"The file no longer exists:\n\n" + entry->path +
-                       L"\n\nThe index may be out of date. Would you like to rebuild the index now?";
-    int ret = MessageBoxW(m_hwnd, msg.c_str(), L"File Not Found",
-                           MB_YESNO | MB_ICONWARNING);
-    if (ret == IDYES) m_indexer->StartIndexing(true);
+    std::wstring msg =
+        L"The file no longer exists:\n\n" + entry->path +
+        L"\n\nThe index may be out of date. Would you like to rebuild the index now?";
+    int ret = MessageBoxW(m_hwnd, msg.c_str(), L"File Not Found", MB_YESNO | MB_ICONWARNING);
+    if (ret == IDYES)
+        m_indexer->StartIndexing(true);
     return false;
 }
 
 void MainWindow::OpenSelectedFile() {
     int sel = ListView_GetNextItem(m_hListView, -1, LVNI_SELECTED);
-    if (sel < 0 || sel >= static_cast<int>(m_currentResults.size())) return;
+    if (sel < 0 || sel >= static_cast<int>(m_currentResults.size()))
+        return;
     const FileEntry* entry = m_currentResults[sel].entry;
-    if (!PreCheckFileExists(entry)) return;
+    if (!PreCheckFileExists(entry))
+        return;
     ShellExecuteW(m_hwnd, L"open", entry->path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
 void MainWindow::OpenContainingFolder() {
     int sel = ListView_GetNextItem(m_hListView, -1, LVNI_SELECTED);
-    if (sel < 0 || sel >= static_cast<int>(m_currentResults.size())) return;
+    if (sel < 0 || sel >= static_cast<int>(m_currentResults.size()))
+        return;
     const FileEntry* entry = m_currentResults[sel].entry;
 
     std::wstring dir = entry->path;
     size_t slash = dir.rfind(L'\\');
-    if (slash != std::wstring::npos) dir = dir.substr(0, slash);
+    if (slash != std::wstring::npos)
+        dir = dir.substr(0, slash);
 
     // Open Explorer with file selected
     PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(entry->path.c_str());
@@ -400,11 +434,13 @@ void MainWindow::CopySelectedPaths(bool filenameOnly) {
     std::wstring text;
     int i = -1;
     while ((i = ListView_GetNextItem(m_hListView, i, LVNI_SELECTED)) != -1) {
-        if (i >= static_cast<int>(m_currentResults.size())) break;
+        if (i >= static_cast<int>(m_currentResults.size()))
+            break;
         const FileEntry* e = m_currentResults[i].entry;
         text += (filenameOnly ? e->name : e->path) + L"\r\n";
     }
-    if (text.empty()) return;
+    if (text.empty())
+        return;
 
     if (OpenClipboard(m_hwnd)) {
         EmptyClipboard();
@@ -425,19 +461,22 @@ void MainWindow::CutSelectedFiles() {
     std::wstring paths;
     int i = -1;
     while ((i = ListView_GetNextItem(m_hListView, i, LVNI_SELECTED)) != -1) {
-        if (i >= static_cast<int>(m_currentResults.size())) break;
+        if (i >= static_cast<int>(m_currentResults.size()))
+            break;
         paths += m_currentResults[i].entry->path + L'\0';
     }
-    if (paths.empty()) return;
-    paths += L'\0'; // double null terminate
+    if (paths.empty())
+        return;
+    paths += L'\0';  // double null terminate
 
     size_t dropSize = sizeof(DROPFILES) + (paths.size()) * sizeof(wchar_t);
     HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, dropSize);
-    if (!hMem) return;
+    if (!hMem)
+        return;
 
     auto* df = static_cast<DROPFILES*>(GlobalLock(hMem));
     df->pFiles = sizeof(DROPFILES);
-    df->fWide  = TRUE;
+    df->fWide = TRUE;
     memcpy(df + 1, paths.c_str(), paths.size() * sizeof(wchar_t));
     GlobalUnlock(hMem);
 
@@ -450,55 +489,58 @@ void MainWindow::CutSelectedFiles() {
 
     if (OpenClipboard(m_hwnd)) {
         EmptyClipboard();
-        UINT cfDrop   = CF_HDROP;
+        UINT cfDrop = CF_HDROP;
         UINT cfEffect = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
         SetClipboardData(cfDrop, hMem);
-        if (hEffect) SetClipboardData(cfEffect, hEffect);
+        if (hEffect)
+            SetClipboardData(cfEffect, hEffect);
         CloseClipboard();
     }
 }
 
 void MainWindow::DeleteSelectedFiles() {
     int selCount = ListView_GetSelectedCount(m_hListView);
-    if (selCount == 0) return;
+    if (selCount == 0)
+        return;
 
-    std::wstring msg = L"Are you sure you want to delete " +
-                       std::to_wstring(selCount) + L" file(s)?";
-    if (MessageBoxW(m_hwnd, msg.c_str(), L"Confirm Delete",
-                     MB_YESNO | MB_ICONWARNING) != IDYES) return;
+    std::wstring msg =
+        L"Are you sure you want to delete " + std::to_wstring(selCount) + L" file(s)?";
+    if (MessageBoxW(m_hwnd, msg.c_str(), L"Confirm Delete", MB_YESNO | MB_ICONWARNING) != IDYES)
+        return;
 
     // Build double-null-terminated path list for SHFileOperation
     std::wstring paths;
     int i = -1;
     while ((i = ListView_GetNextItem(m_hListView, i, LVNI_SELECTED)) != -1) {
-        if (i >= static_cast<int>(m_currentResults.size())) break;
+        if (i >= static_cast<int>(m_currentResults.size()))
+            break;
         paths += m_currentResults[i].entry->path + L'\0';
     }
-    if (paths.empty()) return;
+    if (paths.empty())
+        return;
     paths += L'\0';
 
     SHFILEOPSTRUCTW op{};
-    op.hwnd   = m_hwnd;
-    op.wFunc  = FO_DELETE;
-    op.pFrom  = paths.c_str();
+    op.hwnd = m_hwnd;
+    op.wFunc = FO_DELETE;
+    op.pFrom = paths.c_str();
     op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION;
     SHFileOperationW(&op);
 }
 
 void MainWindow::ShowAbout() {
     MessageBoxW(m_hwnd,
-        L"winindex v0.1\n\nBlazingly fast Windows file search.\n\nhttps://github.com/rajeshsub/winindex",
-        L"About winindex", MB_OK | MB_ICONINFORMATION);
+                L"winindex v0.1\n\nBlazingly fast Windows file "
+                L"search.\n\nhttps://github.com/rajeshsub/winindex",
+                L"About winindex", MB_OK | MB_ICONINFORMATION);
 }
 
 void MainWindow::SetStatusText(const std::wstring& text) {
-    SendMessageW(m_hStatusBar, SB_SETTEXTW, 0,
-                  reinterpret_cast<LPARAM>(text.c_str()));
+    SendMessageW(m_hStatusBar, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(text.c_str()));
 }
 
 LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    MainWindow* self = reinterpret_cast<MainWindow*>(
-        GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    MainWindow* self = reinterpret_cast<MainWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
 
     switch (msg) {
         case WM_CREATE: {
@@ -508,14 +550,17 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
             return 0;
         }
         case WM_SIZE:
-            if (self) self->OnSize(LOWORD(lp), HIWORD(lp));
+            if (self)
+                self->OnSize(LOWORD(lp), HIWORD(lp));
             return 0;
 
         case WM_COMMAND:
             if (HIWORD(wp) == EN_CHANGE && LOWORD(wp) == IDC_SEARCHBAR) {
-                if (self) self->OnSearchChanged();
+                if (self)
+                    self->OnSearchChanged();
             } else {
-                if (self) self->OnCommand(LOWORD(wp));
+                if (self)
+                    self->OnCommand(LOWORD(wp));
             }
             return 0;
 
@@ -528,11 +573,16 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
 
         case WM_NOTIFY: {
             auto* hdr = reinterpret_cast<NMHDR*>(lp);
-            if (!self) break;
+            if (!self)
+                break;
             if (hdr->idFrom == IDC_LISTVIEW) {
                 switch (hdr->code) {
-                    case NM_DBLCLK:    self->OnListDblClick(); break;
-                    case LVN_KEYDOWN:  self->OnListKeyDown(reinterpret_cast<NMLVKEYDOWN*>(lp)); break;
+                    case NM_DBLCLK:
+                        self->OnListDblClick();
+                        break;
+                    case LVN_KEYDOWN:
+                        self->OnListKeyDown(reinterpret_cast<NMLVKEYDOWN*>(lp));
+                        break;
                     case LVN_GETDISPINFOW: {
                         auto* di = reinterpret_cast<NMLVDISPINFOW*>(lp);
                         int idx = di->item.iItem;
@@ -541,14 +591,16 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                         const FileEntry* e = self->m_currentResults[idx].entry;
                         if (di->item.mask & LVIF_TEXT) {
                             switch (di->item.iSubItem) {
-                                case 0: di->item.pszText = const_cast<LPWSTR>(e->name.c_str()); break;
+                                case 0:
+                                    di->item.pszText = const_cast<LPWSTR>(e->name.c_str());
+                                    break;
                                 case 1: {
                                     // Show path without filename
                                     static thread_local std::wstring pathBuf;
                                     size_t slash = e->path.rfind(L'\\');
                                     pathBuf = (slash != std::wstring::npos)
-                                              ? e->path.substr(0, slash)
-                                              : e->path;
+                                                  ? e->path.substr(0, slash)
+                                                  : e->path;
                                     di->item.pszText = const_cast<LPWSTR>(pathBuf.c_str());
                                     break;
                                 }
@@ -559,22 +611,21 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                                     else if (e->size < 1024 * 1024)
                                         sizeBuf = std::to_wstring(e->size / 1024) + L" KB";
                                     else
-                                        sizeBuf = std::to_wstring(e->size / (1024*1024)) + L" MB";
+                                        sizeBuf = std::to_wstring(e->size / (1024 * 1024)) + L" MB";
                                     di->item.pszText = const_cast<LPWSTR>(sizeBuf.c_str());
                                     break;
                                 }
                                 case 3: {
                                     static thread_local std::wstring dateBuf;
                                     FILETIME ft;
-                                    ft.dwLowDateTime  = static_cast<DWORD>(e->lastModified);
+                                    ft.dwLowDateTime = static_cast<DWORD>(e->lastModified);
                                     ft.dwHighDateTime = static_cast<DWORD>(e->lastModified >> 32);
                                     SYSTEMTIME st{};
                                     FileTimeToLocalFileTime(&ft, &ft);
                                     FileTimeToSystemTime(&ft, &st);
                                     wchar_t buf[64]{};
-                                    swprintf_s(buf, L"%04d-%02d-%02d %02d:%02d",
-                                               st.wYear, st.wMonth, st.wDay,
-                                               st.wHour, st.wMinute);
+                                    swprintf_s(buf, L"%04d-%02d-%02d %02d:%02d", st.wYear,
+                                               st.wMonth, st.wDay, st.wHour, st.wMinute);
                                     dateBuf = buf;
                                     di->item.pszText = const_cast<LPWSTR>(dateBuf.c_str());
                                     break;
@@ -589,19 +640,22 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
         }
 
         case WM_CONTEXTMENU:
-            if (self) self->OnContextMenu(reinterpret_cast<HWND>(wp), GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
+            if (self)
+                self->OnContextMenu(reinterpret_cast<HWND>(wp), GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
             return 0;
 
         case WM_INDEXER_STATUS: {
             auto* s = reinterpret_cast<IndexerStatus*>(lp);
-            if (self && s) self->OnIndexerStatus(*s);
+            if (self && s)
+                self->OnIndexerStatus(*s);
             delete s;
             return 0;
         }
 
         case WM_SEARCH_RESULTS: {
             auto* r = reinterpret_cast<std::vector<SearchResult>*>(lp);
-            if (self && r) self->OnSearchResults(r);
+            if (self && r)
+                self->OnSearchResults(r);
             return 0;
         }
 
@@ -622,4 +676,4 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
 #define GET_Y_LPARAM(lp) ((int)(short)HIWORD(lp))
 #endif
 
-} // namespace winindex
+}  // namespace winindex

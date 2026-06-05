@@ -1,4 +1,5 @@
 #include "Indexer.h"
+
 #include "DriveEnumerator.h"
 #include "MftScanner.h"
 #include "UsnJournalMonitor.h"
@@ -10,21 +11,22 @@ namespace winindex {
 Indexer::Indexer(std::shared_ptr<IFileSystemScanner> mftScanner,
                  std::shared_ptr<IFileSystemScanner> findScanner,
                  std::shared_ptr<IUsnJournalMonitor> usnMonitor,
-                 std::shared_ptr<IIndexStore>        indexStore,
-                 std::shared_ptr<Settings>           settings)
-    : m_mftScanner(std::move(mftScanner))
-    , m_findScanner(std::move(findScanner))
-    , m_usnMonitor(std::move(usnMonitor))
-    , m_indexStore(std::move(indexStore))
-    , m_settings(std::move(settings)) {
+                 std::shared_ptr<IIndexStore> indexStore, std::shared_ptr<Settings> settings)
+    : m_mftScanner(std::move(mftScanner)),
+      m_findScanner(std::move(findScanner)),
+      m_usnMonitor(std::move(usnMonitor)),
+      m_indexStore(std::move(indexStore)),
+      m_settings(std::move(settings)) {
     m_completionEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
 }
 
 Indexer::~Indexer() {
     Cancel();
     WaitForCompletion();
-    if (m_thread)         CloseHandle(m_thread);
-    if (m_completionEvent) CloseHandle(m_completionEvent);
+    if (m_thread)
+        CloseHandle(m_thread);
+    if (m_completionEvent)
+        CloseHandle(m_completionEvent);
 }
 
 void Indexer::SetStatusCallback(StatusCallback cb) {
@@ -32,7 +34,8 @@ void Indexer::SetStatusCallback(StatusCallback cb) {
 }
 
 void Indexer::StartIndexing(bool force) {
-    if (IsIndexing()) return;
+    if (IsIndexing())
+        return;
 
     // Check if we need to rebuild
     if (!force && m_indexStore->IsIndexValid()) {
@@ -41,7 +44,7 @@ void Indexer::StartIndexing(bool force) {
         if (m_indexStore->GetEntryCount() > 0) {
             EmitStatus(IndexerState::WatchingForChanges,
                        L"Index loaded - " + std::to_wstring(m_indexStore->GetEntryCount()) +
-                       L" files indexed.");
+                           L" files indexed.");
             return;
         }
         // Index file existed but was empty or corrupt — fall through to rebuild.
@@ -53,14 +56,19 @@ void Indexer::StartIndexing(bool force) {
     m_filesIndexed = 0;
     m_skippedPaths = 0;
 
-    struct Params { Indexer* self; };
-    auto* p = new Params{ this };
-    m_thread = CreateThread(nullptr, 0, [](LPVOID param) -> DWORD {
-        auto* p = static_cast<Params*>(param);
-        p->self->IndexingThread();
-        delete p;
-        return 0;
-    }, p, 0, nullptr);
+    struct Params {
+        Indexer* self;
+    };
+    auto* p = new Params{this};
+    m_thread = CreateThread(
+        nullptr, 0,
+        [](LPVOID param) -> DWORD {
+            auto* p = static_cast<Params*>(param);
+            p->self->IndexingThread();
+            delete p;
+            return 0;
+        },
+        p, 0, nullptr);
 }
 
 void Indexer::Cancel() {
@@ -73,14 +81,15 @@ void Indexer::WaitForCompletion() {
 }
 
 bool Indexer::IsIndexing() const {
-    if (!m_completionEvent) return false;
+    if (!m_completionEvent)
+        return false;
     return WaitForSingleObject(m_completionEvent, 0) == WAIT_TIMEOUT;
 }
 
-void Indexer::EmitStatus(IndexerState state, std::wstring message,
-                          uint64_t filesIndexed, uint32_t skipped) {
+void Indexer::EmitStatus(IndexerState state, std::wstring message, uint64_t filesIndexed,
+                         uint32_t skipped) {
     if (m_statusCallback) {
-        IndexerStatus s{ state, std::move(message), filesIndexed, skipped };
+        IndexerStatus s{state, std::move(message), filesIndexed, skipped};
         m_statusCallback(s);
     }
 }
@@ -93,22 +102,23 @@ void Indexer::IndexingThread() {
     if (selectedDrives.empty()) {
         // No drives configured yet (e.g., first-run dialog was skipped).
         // Fall back to all local fixed drives so the app works out of the box.
-        for (const auto& d : EnumerateLocalFixedDrives())
-            selectedDrives.push_back(d.root);
+        for (const auto& d : EnumerateLocalFixedDrives()) selectedDrives.push_back(d.root);
     }
     for (const auto& root : selectedDrives) {
-        if (m_cancel.load(std::memory_order_relaxed)) break;
+        if (m_cancel.load(std::memory_order_relaxed))
+            break;
         ScanDrive(root);
     }
 
     if (!m_cancel.load(std::memory_order_relaxed)) {
         m_indexStore->EndWrite();
         m_indexStore->Save();
-        EmitStatus(IndexerState::WatchingForChanges,
-                   L"Index built - " + std::to_wstring(m_filesIndexed) + L" files" +
-                   (m_skippedPaths > 0
-                       ? L", " + std::to_wstring(m_skippedPaths) + L" paths skipped"
-                       : L"") + L".");
+        EmitStatus(
+            IndexerState::WatchingForChanges,
+            L"Index built - " + std::to_wstring(m_filesIndexed) + L" files" +
+                (m_skippedPaths > 0 ? L", " + std::to_wstring(m_skippedPaths) + L" paths skipped"
+                                    : L"") +
+                L".");
     }
 
     SetEvent(m_completionEvent);
@@ -122,35 +132,33 @@ void Indexer::ScanDrive(const std::wstring& root) {
     bool usingMft = false;
 
     if (fs == DriveFilesystem::NTFS && m_mftScanner->IsMftAvailable(root)) {
-        scanner  = m_mftScanner.get();
+        scanner = m_mftScanner.get();
         usingMft = true;
-        EmitStatus(IndexerState::Scanning,
-                   L"Indexing " + root + L" (MFT mode)...", m_filesIndexed);
+        EmitStatus(IndexerState::Scanning, L"Indexing " + root + L" (MFT mode)...", m_filesIndexed);
     } else if (fs == DriveFilesystem::NTFS) {
-        EmitStatus(IndexerState::Scanning,
-                   L"Indexing " + root +
-                   L" (standard mode - run as administrator for faster MFT scan)...",
-                   m_filesIndexed);
+        EmitStatus(
+            IndexerState::Scanning,
+            L"Indexing " + root + L" (standard mode - run as administrator for faster MFT scan)...",
+            m_filesIndexed);
     } else {
-        EmitStatus(IndexerState::Scanning,
-                   L"Indexing " + root + L" (FAT32)...", m_filesIndexed);
+        EmitStatus(IndexerState::Scanning, L"Indexing " + root + L" (FAT32)...", m_filesIndexed);
     }
 
     ScanOptions opts;
-    opts.rootPaths    = { root };
+    opts.rootPaths = {root};
     opts.excludedPaths = m_settings->GetExcludedPaths();
 
-    scanner->Scan(opts,
+    scanner->Scan(
+        opts,
         [this](const FileEntry& fe) {
             m_indexStore->AddEntry(fe);
             ++m_filesIndexed;
         },
         [this, &root](uint64_t count, const std::wstring& /*dir*/) {
             EmitStatus(IndexerState::Scanning,
-                       L"Indexing " + root + L"... " + std::to_wstring(count) + L" files",
-                       count);
+                       L"Indexing " + root + L"... " + std::to_wstring(count) + L" files", count);
         },
         m_cancel);
 }
 
-} // namespace winindex
+}  // namespace winindex

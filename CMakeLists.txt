@@ -40,22 +40,31 @@ FetchContent_Declare(
     re2
     GIT_REPOSITORY https://github.com/google/re2.git
     GIT_TAG        2024-03-01
+    # re2's install(EXPORT) fails when absl targets aren't exported; strip it.
+    PATCH_COMMAND ${CMAKE_COMMAND} -P "${CMAKE_SOURCE_DIR}/cmake/patch_re2.cmake"
 )
 set(RE2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
-FetchContent_GetProperties(re2)
-if(NOT re2_POPULATED)
-    FetchContent_Populate(re2)
-    # re2's install(EXPORT) fails when absl targets aren't exported; strip it.
-    file(READ "${re2_SOURCE_DIR}/CMakeLists.txt" _re2_cmake)
-    string(REGEX REPLACE "install\\(EXPORT re2Targets[^)]*\\)" "" _re2_cmake "${_re2_cmake}")
-    file(WRITE "${re2_SOURCE_DIR}/CMakeLists.txt" "${_re2_cmake}")
-    add_subdirectory("${re2_SOURCE_DIR}" "${re2_BINARY_DIR}")
-endif()
+FetchContent_MakeAvailable(re2)
 
 # MSVC-specific flags — applied after FetchContent so third-party code is unaffected
 if(MSVC)
     add_compile_options(/W4 /WX /permissive- /sdl /GS)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+endif()
+
+option(ENABLE_ASAN "Enable MSVC Address Sanitizer" OFF)
+if(ENABLE_ASAN)
+    if(NOT MSVC)
+        message(FATAL_ERROR "ENABLE_ASAN is only supported with MSVC.")
+    endif()
+    add_compile_options(/fsanitize=address)
+    # Abseil/RE2/GTest are built without ASAN so their STL annotation values are 0.
+    # Disable all MSVC STL annotations in our code to match; otherwise LNK2038 at link.
+    add_compile_definitions(
+        _DISABLE_VECTOR_ANNOTATION
+        _DISABLE_STRING_ANNOTATION
+        _DISABLE_OPTIONAL_ANNOTATION
+    )
 endif()
 
 # ---------- Subdirectories ----------

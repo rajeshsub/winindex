@@ -3,6 +3,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+
 #include "IUsnJournalMonitor.h"
 #include <atomic>
 #include <functional>
@@ -20,11 +21,11 @@ public:
     void Stop();
 
 private:
-    std::wstring        m_root;
-    HANDLE              m_hDir   = INVALID_HANDLE_VALUE;
-    HANDLE              m_hStop  = INVALID_HANDLE_VALUE;
-    std::atomic<bool>   m_stop{false};
-    HANDLE              m_thread = nullptr;
+    std::wstring m_root;
+    HANDLE m_hDir = INVALID_HANDLE_VALUE;
+    HANDLE m_hStop = INVALID_HANDLE_VALUE;
+    std::atomic<bool> m_stop{false};
+    HANDLE m_thread = nullptr;
 
     struct ThreadParams {
         ChangeWatcher* self;
@@ -35,4 +36,4 @@ private:
     void RunWatch(ChangeCallback& onChange);
 };
 
-} // namespace winindex
+}  // namespace winindex

@@ -3,10 +3,11 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+
+#include "../settings/Settings.h"
+#include "../storage/IIndexStore.h"
 #include "IFileSystemScanner.h"
 #include "IUsnJournalMonitor.h"
-#include "../storage/IIndexStore.h"
-#include "../settings/Settings.h"
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -14,19 +15,13 @@
 
 namespace winindex {
 
-enum class IndexerState {
-    Idle,
-    Scanning,
-    LoadingIndex,
-    WatchingForChanges,
-    Error
-};
+enum class IndexerState { Idle, Scanning, LoadingIndex, WatchingForChanges, Error };
 
 struct IndexerStatus {
     IndexerState state;
     std::wstring message;
-    uint64_t     filesIndexed;
-    uint32_t     skippedPaths;
+    uint64_t filesIndexed;
+    uint32_t skippedPaths;
 };
 
 using StatusCallback = std::function<void(const IndexerStatus&)>;
@@ -35,9 +30,8 @@ class Indexer {
 public:
     Indexer(std::shared_ptr<IFileSystemScanner> mftScanner,
             std::shared_ptr<IFileSystemScanner> findScanner,
-            std::shared_ptr<IUsnJournalMonitor> usnMonitor,
-            std::shared_ptr<IIndexStore>        indexStore,
-            std::shared_ptr<Settings>           settings);
+            std::shared_ptr<IUsnJournalMonitor> usnMonitor, std::shared_ptr<IIndexStore> indexStore,
+            std::shared_ptr<Settings> settings);
 
     ~Indexer();
 
@@ -58,21 +52,21 @@ private:
     void IndexingThread();
     void ScanDrive(const std::wstring& root);
     void ApplyChange(const FileChangeEvent& evt);
-    void EmitStatus(IndexerState state, std::wstring message,
-                    uint64_t filesIndexed = 0, uint32_t skipped = 0);
+    void EmitStatus(IndexerState state, std::wstring message, uint64_t filesIndexed = 0,
+                    uint32_t skipped = 0);
 
     std::shared_ptr<IFileSystemScanner> m_mftScanner;
     std::shared_ptr<IFileSystemScanner> m_findScanner;
     std::shared_ptr<IUsnJournalMonitor> m_usnMonitor;
-    std::shared_ptr<IIndexStore>        m_indexStore;
-    std::shared_ptr<Settings>           m_settings;
+    std::shared_ptr<IIndexStore> m_indexStore;
+    std::shared_ptr<Settings> m_settings;
 
-    StatusCallback      m_statusCallback;
-    std::atomic<bool>   m_cancel{false};
-    HANDLE              m_thread = nullptr;
-    HANDLE              m_completionEvent = nullptr;
-    uint64_t            m_filesIndexed = 0;
-    uint32_t            m_skippedPaths = 0;
+    StatusCallback m_statusCallback;
+    std::atomic<bool> m_cancel{false};
+    HANDLE m_thread = nullptr;
+    HANDLE m_completionEvent = nullptr;
+    uint64_t m_filesIndexed = 0;
+    uint32_t m_skippedPaths = 0;
 };
 
-} // namespace winindex
+}  // namespace winindex

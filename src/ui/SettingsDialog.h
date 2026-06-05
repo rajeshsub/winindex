@@ -1,9 +1,10 @@
 #pragma once
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <memory>
-#include "../core/settings/Settings.h"
+
 #include "../core/indexer/DriveEnumerator.h"
+#include "../core/settings/Settings.h"
+#include <memory>
 
 namespace winindex {
 
@@ -13,9 +14,9 @@ public:
     bool Show();
 
 private:
-    HWND                      m_hParent;
+    HWND m_hParent;
     std::shared_ptr<Settings> m_settings;
-    std::vector<DriveInfo>    m_drives;
+    std::vector<DriveInfo> m_drives;
 
     static INT_PTR CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     void OnInit(HWND hwnd);
@@ -24,4 +25,4 @@ private:
     void OnRemoveExclusion(HWND hwnd);
 };
 
-} // namespace winindex
+}  // namespace winindex

@@ -1,7 +1,9 @@
 #include "SettingsDialog.h"
-#include "resource.h"
+
 #include <commctrl.h>
 #include <shlobj.h>
+
+#include "resource.h"
 #include <algorithm>
 
 namespace winindex {
@@ -14,16 +16,12 @@ SettingsDialog::SettingsDialog(HWND hParent, std::shared_ptr<Settings> settings)
 bool SettingsDialog::Show() {
     INT_PTR result = DialogBoxParamW(
         reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(m_hParent, GWLP_HINSTANCE)),
-        MAKEINTRESOURCEW(IDD_SETTINGS),
-        m_hParent,
-        DlgProc,
-        reinterpret_cast<LPARAM>(this));
+        MAKEINTRESOURCEW(IDD_SETTINGS), m_hParent, DlgProc, reinterpret_cast<LPARAM>(this));
     return result == IDOK;
 }
 
 INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    SettingsDialog* self = reinterpret_cast<SettingsDialog*>(
-        GetWindowLongPtrW(hwnd, DWLP_USER));
+    SettingsDialog* self = reinterpret_cast<SettingsDialog*>(GetWindowLongPtrW(hwnd, DWLP_USER));
 
     switch (msg) {
         case WM_INITDIALOG:
@@ -34,7 +32,8 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
         case WM_COMMAND:
             switch (LOWORD(wp)) {
                 case IDOK:
-                    if (self) self->OnOk(hwnd);
+                    if (self)
+                        self->OnOk(hwnd);
                     EndDialog(hwnd, IDOK);
                     return TRUE;
                 case IDCANCEL:
@@ -44,11 +43,17 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
                     if (self) {
                         bool manual = IsDlgButtonChecked(hwnd, IDC_MANUAL_ONLY) == BST_CHECKED;
                         EnableWindow(GetDlgItem(hwnd, IDC_REINDEX_INTERVAL), !manual);
-                        EnableWindow(GetDlgItem(hwnd, IDC_REINDEX_UNIT),     !manual);
+                        EnableWindow(GetDlgItem(hwnd, IDC_REINDEX_UNIT), !manual);
                     }
                     return TRUE;
-                case IDC_EXCL_ADD:    if (self) self->OnAddExclusion(hwnd);    return TRUE;
-                case IDC_EXCL_REMOVE: if (self) self->OnRemoveExclusion(hwnd); return TRUE;
+                case IDC_EXCL_ADD:
+                    if (self)
+                        self->OnAddExclusion(hwnd);
+                    return TRUE;
+                case IDC_EXCL_REMOVE:
+                    if (self)
+                        self->OnRemoveExclusion(hwnd);
+                    return TRUE;
             }
             break;
     }
@@ -63,12 +68,12 @@ void SettingsDialog::OnInit(HWND hwnd) {
     auto selected = m_settings->GetSelectedDrives();
     for (const auto& drive : m_drives) {
         std::wstring label = drive.root;
-        if (!drive.label.empty()) label += L" (" + drive.label + L")";
+        if (!drive.label.empty())
+            label += L" (" + drive.label + L")";
         label += (drive.filesystem == DriveFilesystem::NTFS) ? L" [NTFS]" : L" [FAT32]";
 
         int idx = static_cast<int>(
-            SendMessageW(hDriveList, LB_ADDSTRING, 0,
-                          reinterpret_cast<LPARAM>(label.c_str())));
+            SendMessageW(hDriveList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str())));
 
         bool isSel = std::find(selected.begin(), selected.end(), drive.root) != selected.end();
         SendMessageW(hDriveList, LB_SETSEL, isSel ? TRUE : FALSE, idx);
@@ -79,7 +84,7 @@ void SettingsDialog::OnInit(HWND hwnd) {
     bool manualOnly = (interval == kReindexManualOnly);
     CheckDlgButton(hwnd, IDC_MANUAL_ONLY, manualOnly ? BST_CHECKED : BST_UNCHECKED);
     EnableWindow(GetDlgItem(hwnd, IDC_REINDEX_INTERVAL), !manualOnly);
-    EnableWindow(GetDlgItem(hwnd, IDC_REINDEX_UNIT),     !manualOnly);
+    EnableWindow(GetDlgItem(hwnd, IDC_REINDEX_UNIT), !manualOnly);
 
     HWND hUnit = GetDlgItem(hwnd, IDC_REINDEX_UNIT);
     SendMessageW(hUnit, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Hours"));
@@ -87,13 +92,11 @@ void SettingsDialog::OnInit(HWND hwnd) {
 
     if (!manualOnly) {
         if (interval % 24 == 0 && interval >= 24) {
-            SetDlgItemTextW(hwnd, IDC_REINDEX_INTERVAL,
-                             std::to_wstring(interval / 24).c_str());
-            SendMessageW(hUnit, CB_SETCURSEL, 1, 0); // Days
+            SetDlgItemTextW(hwnd, IDC_REINDEX_INTERVAL, std::to_wstring(interval / 24).c_str());
+            SendMessageW(hUnit, CB_SETCURSEL, 1, 0);  // Days
         } else {
-            SetDlgItemTextW(hwnd, IDC_REINDEX_INTERVAL,
-                             std::to_wstring(interval).c_str());
-            SendMessageW(hUnit, CB_SETCURSEL, 0, 0); // Hours
+            SetDlgItemTextW(hwnd, IDC_REINDEX_INTERVAL, std::to_wstring(interval).c_str());
+            SendMessageW(hUnit, CB_SETCURSEL, 0, 0);  // Hours
         }
     } else {
         SetDlgItemTextW(hwnd, IDC_REINDEX_INTERVAL, L"48");
@@ -103,8 +106,7 @@ void SettingsDialog::OnInit(HWND hwnd) {
     // Exclusion list
     HWND hExclList = GetDlgItem(hwnd, IDC_EXCL_LIST);
     for (const auto& excl : m_settings->GetExcludedPaths()) {
-        SendMessageW(hExclList, LB_ADDSTRING, 0,
-                      reinterpret_cast<LPARAM>(excl.c_str()));
+        SendMessageW(hExclList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(excl.c_str()));
     }
 }
 
@@ -127,9 +129,10 @@ void SettingsDialog::OnOk(HWND hwnd) {
         wchar_t buf[32]{};
         GetDlgItemTextW(hwnd, IDC_REINDEX_INTERVAL, buf, 32);
         uint64_t val = _wtoi64(buf);
-        int unitSel = static_cast<int>(
-            SendMessageW(GetDlgItem(hwnd, IDC_REINDEX_UNIT), CB_GETCURSEL, 0, 0));
-        if (unitSel == 1) val *= 24;
+        int unitSel =
+            static_cast<int>(SendMessageW(GetDlgItem(hwnd, IDC_REINDEX_UNIT), CB_GETCURSEL, 0, 0));
+        if (unitSel == 1)
+            val *= 24;
         m_settings->SetReindexIntervalHours(val > 0 ? val : kReindexDefaultHours);
     }
 
@@ -153,14 +156,13 @@ void SettingsDialog::OnAddExclusion(HWND hwnd) {
     bi.hwndOwner = hwnd;
     bi.pszDisplayName = path;
     bi.lpszTitle = L"Select folder to exclude:";
-    bi.ulFlags   = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
     PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&bi);
     if (pidl) {
         wchar_t fullPath[MAX_PATH]{};
         if (SHGetPathFromIDListW(pidl, fullPath)) {
             HWND hList = GetDlgItem(hwnd, IDC_EXCL_LIST);
-            SendMessageW(hList, LB_ADDSTRING, 0,
-                          reinterpret_cast<LPARAM>(fullPath));
+            SendMessageW(hList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(fullPath));
         }
         CoTaskMemFree(pidl);
     }
@@ -169,7 +171,8 @@ void SettingsDialog::OnAddExclusion(HWND hwnd) {
 void SettingsDialog::OnRemoveExclusion(HWND hwnd) {
     HWND hList = GetDlgItem(hwnd, IDC_EXCL_LIST);
     int sel = static_cast<int>(SendMessageW(hList, LB_GETCURSEL, 0, 0));
-    if (sel != LB_ERR) SendMessageW(hList, LB_DELETESTRING, sel, 0);
+    if (sel != LB_ERR)
+        SendMessageW(hList, LB_DELETESTRING, sel, 0);
 }
 
-} // namespace winindex
+}  // namespace winindex

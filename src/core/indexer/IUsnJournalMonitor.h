@@ -11,9 +11,9 @@ enum class FileChangeType { Added, Removed, Renamed, Modified };
 
 /// @brief A single file-system change event from the USN journal.
 struct FileChangeEvent {
-    FileChangeType type;        ///< Kind of change.
-    std::wstring   path;        ///< Affected file's full path.
-    std::wstring   oldPath;     ///< Previous path — only set for Renamed events.
+    FileChangeType type;   ///< Kind of change.
+    std::wstring path;     ///< Affected file's full path.
+    std::wstring oldPath;  ///< Previous path — only set for Renamed events.
 };
 
 /// @brief Callback invoked when a file-system change is detected.
@@ -36,9 +36,8 @@ public:
     /// @param savedUsn  Last persisted USN; pass 0 to replay from the oldest available record.
     /// @param onChange  Callback invoked for each change.
     /// @return The new USN cursor — persist this so the next startup can call ReplaySince again.
-    virtual uint64_t ReplaySince(const std::wstring& root,
-                                  uint64_t savedUsn,
-                                  ChangeCallback onChange) = 0;
+    virtual uint64_t ReplaySince(const std::wstring& root, uint64_t savedUsn,
+                                 ChangeCallback onChange) = 0;
 
     /// @brief Starts live monitoring, calling @p onChange on the calling thread.
     ///
@@ -48,10 +47,8 @@ public:
     /// @param startUsn   USN to begin watching from (typically the value returned by ReplaySince).
     /// @param onChange   Callback invoked for each live change.
     /// @param stopToken  Set to true externally to stop monitoring and return.
-    virtual void StartMonitoring(const std::wstring& root,
-                                  uint64_t startUsn,
-                                  ChangeCallback onChange,
-                                  const std::atomic<bool>& stopToken) = 0;
+    virtual void StartMonitoring(const std::wstring& root, uint64_t startUsn,
+                                 ChangeCallback onChange, const std::atomic<bool>& stopToken) = 0;
 };
 
-} // namespace winindex
+}  // namespace winindex

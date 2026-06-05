@@ -18,8 +18,9 @@ bool IsPortableMode() {
 }
 
 bool EnsureDirectory(const std::wstring& path) {
-    if (CreateDirectoryW(path.c_str(), nullptr)) return true;
+    if (CreateDirectoryW(path.c_str(), nullptr))
+        return true;
     return GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
-} // namespace winindex
+}  // namespace winindex

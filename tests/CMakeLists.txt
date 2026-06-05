@@ -25,4 +25,4 @@ target_include_directories(winindex_tests PRIVATE
 )
 
 include(GoogleTest)
-gtest_discover_tests(winindex_tests)
+gtest_discover_tests(winindex_tests DISCOVERY_MODE PRE_TEST)
