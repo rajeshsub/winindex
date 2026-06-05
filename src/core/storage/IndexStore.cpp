@@ -1,13 +1,14 @@
 #include "IndexStore.h"
+
 #include "IndexSerializer.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+
 #include <algorithm>
 
 namespace winindex {
 
-IndexStore::IndexStore(std::shared_ptr<Settings> settings)
-    : m_settings(std::move(settings)) {}
+IndexStore::IndexStore(std::shared_ptr<Settings> settings) : m_settings(std::move(settings)) {}
 
 std::wstring IndexStore::IndexFilePath() const {
     return m_settings->GetDataDirectory() + L"\\winindex.idx";
@@ -17,17 +18,19 @@ bool IndexStore::IsIndexValid() const {
     std::wstring path = IndexFilePath();
 
     WIN32_FILE_ATTRIBUTE_DATA fad{};
-    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &fad)) return false;
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &fad))
+        return false;
 
     // Check age against configured reindex interval
     uint64_t reindexIntervalHours = m_settings->GetReindexIntervalHours();
-    if (reindexIntervalHours == 0) return true; // Manual only — always treat as valid
+    if (reindexIntervalHours == 0)
+        return true;  // Manual only — always treat as valid
 
     FILETIME now{};
     GetSystemTimeAsFileTime(&now);
-    uint64_t nowVal  = (static_cast<uint64_t>(now.dwHighDateTime) << 32) | now.dwLowDateTime;
-    uint64_t fileVal = (static_cast<uint64_t>(fad.ftLastWriteTime.dwHighDateTime) << 32)
-                        | fad.ftLastWriteTime.dwLowDateTime;
+    uint64_t nowVal = (static_cast<uint64_t>(now.dwHighDateTime) << 32) | now.dwLowDateTime;
+    uint64_t fileVal = (static_cast<uint64_t>(fad.ftLastWriteTime.dwHighDateTime) << 32) |
+                       fad.ftLastWriteTime.dwLowDateTime;
 
     // FILETIME is in 100-nanosecond intervals
     constexpr uint64_t hundredNsPerHour = 36000000000ULL;
@@ -74,13 +77,13 @@ void IndexStore::ApplyRemove(const std::wstring& path) {
     std::lock_guard lock(m_mutex);
     std::wstring lower = path;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
-    m_entries.erase(
-        std::remove_if(m_entries.begin(), m_entries.end(), [&](const FileEntry& e) {
-            std::wstring p = e.path;
-            std::transform(p.begin(), p.end(), p.begin(), ::towlower);
-            return p == lower;
-        }),
-        m_entries.end());
+    m_entries.erase(std::remove_if(m_entries.begin(), m_entries.end(),
+                                   [&](const FileEntry& e) {
+                                       std::wstring p = e.path;
+                                       std::transform(p.begin(), p.end(), p.begin(), ::towlower);
+                                       return p == lower;
+                                   }),
+                    m_entries.end());
 }
 
 void IndexStore::ApplyRename(const std::wstring& oldPath, const std::wstring& newPath) {
@@ -121,4 +124,4 @@ void IndexStore::SetSavedUsn(const std::wstring& root, uint64_t usn) {
     m_usnMap[root] = usn;
 }
 
-} // namespace winindex
+}  // namespace winindex

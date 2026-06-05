@@ -1,18 +1,22 @@
 #include "SearchEngine.h"
+
 #include "SimdSearch.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+
+#include <re2/re2.h>
+
 #include <algorithm>
-#include <thread>
 #include <future>
 #include <mutex>
-#include <re2/re2.h>
+#include <thread>
 
 namespace winindex {
 
 // Convert wide string to UTF-8 for RE2
 std::string SearchEngine::WideToUtf8(const std::wstring& s) {
-    if (s.empty()) return {};
+    if (s.empty())
+        return {};
     int sz = WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, nullptr, 0, nullptr, nullptr);
     std::string r(sz - 1, '\0');
     WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, r.data(), sz, nullptr, nullptr);
@@ -22,35 +26,32 @@ std::string SearchEngine::WideToUtf8(const std::wstring& s) {
 // Very basic diacritic normalization via NFC -> ASCII fold using WinAPI
 std::wstring SearchEngine::NormalizeDiacritics(const std::wstring& s) {
     // FoldString with MAP_PRECOMPOSED + custom: use LCMapString for normalization
-    int needed = LCMapStringEx(LOCALE_NAME_INVARIANT,
-                                LCMAP_LINGUISTIC_CASING | LCMAP_LOWERCASE,
-                                s.c_str(), static_cast<int>(s.size()),
-                                nullptr, 0, nullptr, nullptr, 0);
-    if (needed <= 0) return s;
+    int needed =
+        LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LINGUISTIC_CASING | LCMAP_LOWERCASE, s.c_str(),
+                      static_cast<int>(s.size()), nullptr, 0, nullptr, nullptr, 0);
+    if (needed <= 0)
+        return s;
     std::wstring result(needed, L'\0');
-    LCMapStringEx(LOCALE_NAME_INVARIANT,
-                   LCMAP_LINGUISTIC_CASING | LCMAP_LOWERCASE,
-                   s.c_str(), static_cast<int>(s.size()),
-                   result.data(), needed, nullptr, nullptr, 0);
+    LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LINGUISTIC_CASING | LCMAP_LOWERCASE, s.c_str(),
+                  static_cast<int>(s.size()), result.data(), needed, nullptr, nullptr, 0);
     return result;
 }
 
 bool SearchEngine::MatchesWholeWord(const std::wstring& text, size_t pos, size_t len) {
     auto isWordChar = [](wchar_t c) { return iswalnum(c) || c == L'_'; };
-    if (pos > 0 && isWordChar(text[pos - 1])) return false;
-    if (pos + len < text.size() && isWordChar(text[pos + len])) return false;
+    if (pos > 0 && isWordChar(text[pos - 1]))
+        return false;
+    if (pos + len < text.size() && isWordChar(text[pos + len]))
+        return false;
     return true;
 }
 
-std::vector<SearchResult> SearchEngine::Search(
-    const std::wstring& query,
-    const FileEntry*    entries,
-    uint64_t            entryCount,
-    const SearchOptions& options,
-    uint32_t            maxResults,
-    const std::atomic<bool>& cancelToken) {
-
-    if (query.size() < 2) return {};
+std::vector<SearchResult> SearchEngine::Search(const std::wstring& query, const FileEntry* entries,
+                                               uint64_t entryCount, const SearchOptions& options,
+                                               uint32_t maxResults,
+                                               const std::atomic<bool>& cancelToken) {
+    if (query.size() < 2)
+        return {};
 
     if (options.useRegex)
         return SearchRegex(query, entries, entryCount, options, maxResults, cancelToken);
@@ -58,21 +59,19 @@ std::vector<SearchResult> SearchEngine::Search(
         return SearchSubstring(query, entries, entryCount, options, maxResults, cancelToken);
 }
 
-std::vector<SearchResult> SearchEngine::SearchRegex(
-    const std::wstring& query,
-    const FileEntry*    entries,
-    uint64_t            entryCount,
-    const SearchOptions& options,
-    uint32_t            maxResults,
-    const std::atomic<bool>& cancelToken) {
-
+std::vector<SearchResult> SearchEngine::SearchRegex(const std::wstring& query,
+                                                    const FileEntry* entries, uint64_t entryCount,
+                                                    const SearchOptions& options,
+                                                    uint32_t maxResults,
+                                                    const std::atomic<bool>& cancelToken) {
     RE2::Options re2opts;
     re2opts.set_case_sensitive(options.caseSensitive);
     re2opts.set_encoding(RE2::Options::EncodingUTF8);
 
     std::string utf8Query = WideToUtf8(query);
     RE2 re(utf8Query, re2opts);
-    if (!re.ok()) return {}; // Invalid regex — return empty
+    if (!re.ok())
+        return {};  // Invalid regex — return empty
 
     // Capture-group version used only for whole-word boundary checks.
     // RE2::PartialMatch with a StringPiece* arg returns false if the pattern
@@ -90,33 +89,32 @@ std::vector<SearchResult> SearchEngine::SearchRegex(
 
         if (options.wholeWord) {
             re2::StringPiece match;
-            if (!reCapture.ok() || !RE2::PartialMatch(utf8Target, reCapture, &match)) continue;
+            if (!reCapture.ok() || !RE2::PartialMatch(utf8Target, reCapture, &match))
+                continue;
             size_t matchPos = static_cast<size_t>(match.data() - utf8Target.data());
-            if (!MatchesWholeWord(target, matchPos, match.size())) continue;
+            if (!MatchesWholeWord(target, matchPos, match.size()))
+                continue;
         } else {
-            if (!RE2::PartialMatch(utf8Target, re)) continue;
+            if (!RE2::PartialMatch(utf8Target, re))
+                continue;
         }
 
         SearchResult sr;
-        sr.entry      = &e;
+        sr.entry = &e;
         sr.matchStart = 0;
-        sr.matchLen   = 0;
+        sr.matchLen = 0;
         results.push_back(sr);
 
-        if (results.size() >= maxResults) break;
+        if (results.size() >= maxResults)
+            break;
     }
     return results;
 }
 
 std::vector<SearchResult> SearchEngine::SearchSubstring(
-    const std::wstring& query,
-    const FileEntry*    entries,
-    uint64_t            entryCount,
-    const SearchOptions& options,
-    uint32_t            maxResults,
-    const std::atomic<bool>& cancelToken) {
-
-    std::wstring needle = options.caseSensitive ? query : [&]{
+    const std::wstring& query, const FileEntry* entries, uint64_t entryCount,
+    const SearchOptions& options, uint32_t maxResults, const std::atomic<bool>& cancelToken) {
+    std::wstring needle = options.caseSensitive ? query : [&] {
         std::wstring q = query;
         std::transform(q.begin(), q.end(), q.begin(), ::towlower);
         return q;
@@ -130,43 +128,46 @@ std::vector<SearchResult> SearchEngine::SearchSubstring(
 
     for (unsigned int t = 0; t < numThreads; ++t) {
         uint64_t begin = t * chunkSize;
-        uint64_t end   = std::min(begin + chunkSize, entryCount);
-        if (begin >= entryCount) break;
+        uint64_t end = std::min(begin + chunkSize, entryCount);
+        if (begin >= entryCount)
+            break;
 
-        futures.push_back(std::async(std::launch::async,
-            [&, begin, end]() -> std::vector<SearchResult> {
+        futures.push_back(
+            std::async(std::launch::async, [&, begin, end]() -> std::vector<SearchResult> {
                 // Thread-local buffer for matchPath case-insensitive (avoids per-entry alloc)
                 thread_local std::wstring tlsPathBuf;
 
                 std::vector<SearchResult> local;
                 for (uint64_t i = begin; i < end; ++i) {
-                    if (cancelToken.load(std::memory_order_relaxed)) break;
+                    if (cancelToken.load(std::memory_order_relaxed))
+                        break;
 
                     const FileEntry& e = entries[i];
 
                     // Hot path: name search uses pre-lowercased nameLower — zero allocation
                     const wchar_t* haystackData;
-                    size_t         haystackLen;
+                    size_t haystackLen;
                     if (options.matchPath) {
                         if (options.caseSensitive) {
                             haystackData = e.path.c_str();
-                            haystackLen  = e.path.size();
+                            haystackLen = e.path.size();
                         } else {
                             tlsPathBuf.assign(e.path.begin(), e.path.end());
-                            std::transform(tlsPathBuf.begin(), tlsPathBuf.end(),
-                                           tlsPathBuf.begin(), ::towlower);
+                            std::transform(tlsPathBuf.begin(), tlsPathBuf.end(), tlsPathBuf.begin(),
+                                           ::towlower);
                             haystackData = tlsPathBuf.c_str();
-                            haystackLen  = tlsPathBuf.size();
+                            haystackLen = tlsPathBuf.size();
                         }
                     } else {
                         const std::wstring& hay = options.caseSensitive ? e.name : e.nameLower;
                         haystackData = hay.c_str();
-                        haystackLen  = hay.size();
+                        haystackLen = hay.size();
                     }
 
-                    size_t pos = SimdFindSubstring(haystackData, haystackLen,
-                                                   needle.c_str(), needle.size());
-                    if (pos == std::wstring::npos) continue;
+                    size_t pos =
+                        SimdFindSubstring(haystackData, haystackLen, needle.c_str(), needle.size());
+                    if (pos == std::wstring::npos)
+                        continue;
 
                     if (options.wholeWord) {
                         // Reconstruct wstring view for word-boundary check
@@ -176,9 +177,9 @@ std::vector<SearchResult> SearchEngine::SearchSubstring(
                     }
 
                     SearchResult sr;
-                    sr.entry      = &e;
+                    sr.entry = &e;
                     sr.matchStart = static_cast<uint32_t>(pos);
-                    sr.matchLen   = static_cast<uint32_t>(needle.size());
+                    sr.matchLen = static_cast<uint32_t>(needle.size());
                     local.push_back(sr);
                 }
                 return local;
@@ -191,7 +192,8 @@ std::vector<SearchResult> SearchEngine::SearchSubstring(
     for (auto& f : futures) {
         auto chunk = f.get();
         for (auto& sr : chunk) {
-            if (results.size() >= maxResults) goto done;
+            if (results.size() >= maxResults)
+                goto done;
             results.push_back(sr);
         }
     }
@@ -199,4 +201,4 @@ done:
     return results;
 }
 
-} // namespace winindex
+}  // namespace winindex

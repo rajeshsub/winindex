@@ -1,8 +1,8 @@
 #pragma once
 #include "../indexer/IFileSystemScanner.h"
-#include <vector>
-#include <string>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace winindex {
 
@@ -43,17 +43,15 @@ struct IndexFileHeader {
 
 class IndexSerializer {
 public:
-    static bool Serialize(const std::wstring& filePath,
-                          const std::vector<FileEntry>& entries,
+    static bool Serialize(const std::wstring& filePath, const std::vector<FileEntry>& entries,
                           const std::unordered_map<std::wstring, uint64_t>& usnMap);
 
-    static bool Deserialize(const std::wstring& filePath,
-                             std::vector<FileEntry>& entries,
-                             std::unordered_map<std::wstring, uint64_t>& usnMap,
-                             uint64_t& outTimestamp);
+    static bool Deserialize(const std::wstring& filePath, std::vector<FileEntry>& entries,
+                            std::unordered_map<std::wstring, uint64_t>& usnMap,
+                            uint64_t& outTimestamp);
 
 private:
     static uint32_t Crc32(const void* data, size_t len);
 };
 
-} // namespace winindex
+}  // namespace winindex

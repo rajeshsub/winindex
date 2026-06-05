@@ -12,4 +12,4 @@ bool IsPortableMode();
 // Ensures directory exists, creates it if not.
 bool EnsureDirectory(const std::wstring& path);
 
-} // namespace winindex
+}  // namespace winindex

@@ -14,7 +14,7 @@ public:
 private:
     Logger() = default;
     std::wstring m_path;
-    std::mutex   m_mutex;
+    std::mutex m_mutex;
 };
 
-} // namespace winindex
+}  // namespace winindex

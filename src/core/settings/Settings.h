@@ -1,8 +1,8 @@
 #pragma once
 #include "../search/ISearchEngine.h"
+#include <cstdint>
 #include <string>
 #include <vector>
-#include <cstdint>
 
 namespace winindex {
 
@@ -30,11 +30,11 @@ public:
 
     // Reindex interval (hours). 0 = manual only.
     uint64_t GetReindexIntervalHours() const;
-    void     SetReindexIntervalHours(uint64_t hours);
+    void SetReindexIntervalHours(uint64_t hours);
 
     // Search options
     SearchOptions GetSearchOptions() const;
-    void          SetSearchOptions(const SearchOptions& opts);
+    void SetSearchOptions(const SearchOptions& opts);
 
     bool IsFirstRun() const;
     void SetFirstRunComplete();
@@ -42,23 +42,23 @@ public:
     bool IsPortableMode() const { return m_portable; }
 
 private:
-    bool         m_portable;
+    bool m_portable;
     std::wstring m_dataDir;
     std::wstring m_iniPath;
 
     std::vector<std::wstring> m_selectedDrives;
     std::vector<std::wstring> m_excludedPaths;
-    uint64_t                  m_reindexIntervalHours = kReindexDefaultHours;
-    SearchOptions             m_searchOptions{};
-    bool                      m_firstRun = true;
+    uint64_t m_reindexIntervalHours = kReindexDefaultHours;
+    SearchOptions m_searchOptions{};
+    bool m_firstRun = true;
 
     static std::vector<std::wstring> DefaultExcludedPaths();
 
     void WriteString(const wchar_t* section, const wchar_t* key, const std::wstring& value) const;
     std::wstring ReadString(const wchar_t* section, const wchar_t* key,
-                             const std::wstring& defaultVal = L"") const;
+                            const std::wstring& defaultVal = L"") const;
     void WriteInt(const wchar_t* section, const wchar_t* key, int value) const;
-    int  ReadInt(const wchar_t* section, const wchar_t* key, int defaultVal = 0) const;
+    int ReadInt(const wchar_t* section, const wchar_t* key, int defaultVal = 0) const;
 };
 
-} // namespace winindex
+}  // namespace winindex

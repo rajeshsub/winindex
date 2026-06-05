@@ -1,51 +1,53 @@
 #include "UsnJournalMonitor.h"
+
 #include <winioctl.h>
+
 #include <vector>
 
 namespace winindex {
 
 HANDLE UsnJournalMonitor::OpenVolume(const std::wstring& root) {
     std::wstring volPath = L"\\\\.\\" + root.substr(0, 2);
-    return CreateFileW(volPath.c_str(), GENERIC_READ,
-                       FILE_SHARE_READ | FILE_SHARE_WRITE,
-                       nullptr, OPEN_EXISTING, 0, nullptr);
+    return CreateFileW(volPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                       OPEN_EXISTING, 0, nullptr);
 }
 
 bool UsnJournalMonitor::IsAvailable(const std::wstring& root) const {
     HANDLE hVol = OpenVolume(root);
-    if (hVol == INVALID_HANDLE_VALUE) return false;
+    if (hVol == INVALID_HANDLE_VALUE)
+        return false;
 
     USN_JOURNAL_DATA_V0 jd{};
     DWORD bytes = 0;
-    bool ok = DeviceIoControl(hVol, FSCTL_QUERY_USN_JOURNAL,
-                               nullptr, 0, &jd, sizeof(jd), &bytes, nullptr);
+    bool ok = DeviceIoControl(hVol, FSCTL_QUERY_USN_JOURNAL, nullptr, 0, &jd, sizeof(jd), &bytes,
+                              nullptr);
     CloseHandle(hVol);
     return ok;
 }
 
-uint64_t UsnJournalMonitor::ReplaySince(const std::wstring& root,
-                                         uint64_t savedUsn,
-                                         ChangeCallback onChange) {
+uint64_t UsnJournalMonitor::ReplaySince(const std::wstring& root, uint64_t savedUsn,
+                                        ChangeCallback onChange) {
     HANDLE hVol = OpenVolume(root);
-    if (hVol == INVALID_HANDLE_VALUE) return savedUsn;
+    if (hVol == INVALID_HANDLE_VALUE)
+        return savedUsn;
 
     USN_JOURNAL_DATA_V0 jd{};
     DWORD bytes = 0;
-    if (!DeviceIoControl(hVol, FSCTL_QUERY_USN_JOURNAL,
-                          nullptr, 0, &jd, sizeof(jd), &bytes, nullptr)) {
+    if (!DeviceIoControl(hVol, FSCTL_QUERY_USN_JOURNAL, nullptr, 0, &jd, sizeof(jd), &bytes,
+                         nullptr)) {
         CloseHandle(hVol);
         return savedUsn;
     }
 
     READ_USN_JOURNAL_DATA_V0 rjd{};
-    rjd.StartUsn          = static_cast<USN>(savedUsn);
-    rjd.ReasonMask        = USN_REASON_FILE_CREATE | USN_REASON_FILE_DELETE |
-                            USN_REASON_RENAME_NEW_NAME | USN_REASON_RENAME_OLD_NAME |
-                            USN_REASON_DATA_OVERWRITE | USN_REASON_DATA_EXTEND;
+    rjd.StartUsn = static_cast<USN>(savedUsn);
+    rjd.ReasonMask = USN_REASON_FILE_CREATE | USN_REASON_FILE_DELETE | USN_REASON_RENAME_NEW_NAME |
+                     USN_REASON_RENAME_OLD_NAME | USN_REASON_DATA_OVERWRITE |
+                     USN_REASON_DATA_EXTEND;
     rjd.ReturnOnlyOnClose = FALSE;
-    rjd.Timeout           = 0;
-    rjd.BytesToWaitFor    = 0;
-    rjd.UsnJournalID      = jd.UsnJournalID;
+    rjd.Timeout = 0;
+    rjd.BytesToWaitFor = 0;
+    rjd.UsnJournalID = jd.UsnJournalID;
 
     constexpr DWORD bufSize = 512 * 1024;
     std::vector<BYTE> buf(bufSize);
@@ -53,12 +55,12 @@ uint64_t UsnJournalMonitor::ReplaySince(const std::wstring& root,
 
     while (true) {
         DWORD bytesReturned = 0;
-        if (!DeviceIoControl(hVol, FSCTL_READ_USN_JOURNAL,
-                              &rjd, sizeof(rjd),
-                              buf.data(), bufSize, &bytesReturned, nullptr)) {
+        if (!DeviceIoControl(hVol, FSCTL_READ_USN_JOURNAL, &rjd, sizeof(rjd), buf.data(), bufSize,
+                             &bytesReturned, nullptr)) {
             break;
         }
-        if (bytesReturned <= sizeof(USN)) break;
+        if (bytesReturned <= sizeof(USN))
+            break;
 
         lastUsn = *reinterpret_cast<USN*>(buf.data());
         rjd.StartUsn = lastUsn;
@@ -68,7 +70,7 @@ uint64_t UsnJournalMonitor::ReplaySince(const std::wstring& root,
             std::wstring name(record->FileName, record->FileNameLength / sizeof(wchar_t));
 
             FileChangeEvent evt;
-            evt.path = root + name; // simplified; full path resolution requires FRN lookup
+            evt.path = root + name;  // simplified; full path resolution requires FRN lookup
 
             if (record->Reason & USN_REASON_FILE_CREATE)
                 evt.type = FileChangeType::Added;
@@ -79,10 +81,11 @@ uint64_t UsnJournalMonitor::ReplaySince(const std::wstring& root,
             else
                 evt.type = FileChangeType::Modified;
 
-            if (onChange) onChange(evt);
+            if (onChange)
+                onChange(evt);
 
-            record = reinterpret_cast<USN_RECORD*>(
-                reinterpret_cast<BYTE*>(record) + record->RecordLength);
+            record = reinterpret_cast<USN_RECORD*>(reinterpret_cast<BYTE*>(record) +
+                                                   record->RecordLength);
         }
     }
 
@@ -90,42 +93,42 @@ uint64_t UsnJournalMonitor::ReplaySince(const std::wstring& root,
     return static_cast<uint64_t>(lastUsn);
 }
 
-void UsnJournalMonitor::StartMonitoring(const std::wstring& root,
-                                         uint64_t startUsn,
-                                         ChangeCallback onChange,
-                                         const std::atomic<bool>& stopToken) {
+void UsnJournalMonitor::StartMonitoring(const std::wstring& root, uint64_t startUsn,
+                                        ChangeCallback onChange,
+                                        const std::atomic<bool>& stopToken) {
     HANDLE hVol = OpenVolume(root);
-    if (hVol == INVALID_HANDLE_VALUE) return;
+    if (hVol == INVALID_HANDLE_VALUE)
+        return;
 
     USN_JOURNAL_DATA_V0 jd{};
     DWORD bytes = 0;
-    if (!DeviceIoControl(hVol, FSCTL_QUERY_USN_JOURNAL,
-                          nullptr, 0, &jd, sizeof(jd), &bytes, nullptr)) {
+    if (!DeviceIoControl(hVol, FSCTL_QUERY_USN_JOURNAL, nullptr, 0, &jd, sizeof(jd), &bytes,
+                         nullptr)) {
         CloseHandle(hVol);
         return;
     }
 
     READ_USN_JOURNAL_DATA_V0 rjd{};
-    rjd.StartUsn          = static_cast<USN>(startUsn);
-    rjd.ReasonMask        = USN_REASON_FILE_CREATE | USN_REASON_FILE_DELETE |
-                            USN_REASON_RENAME_NEW_NAME | USN_REASON_RENAME_OLD_NAME |
-                            USN_REASON_DATA_OVERWRITE | USN_REASON_DATA_EXTEND;
+    rjd.StartUsn = static_cast<USN>(startUsn);
+    rjd.ReasonMask = USN_REASON_FILE_CREATE | USN_REASON_FILE_DELETE | USN_REASON_RENAME_NEW_NAME |
+                     USN_REASON_RENAME_OLD_NAME | USN_REASON_DATA_OVERWRITE |
+                     USN_REASON_DATA_EXTEND;
     rjd.ReturnOnlyOnClose = TRUE;
-    rjd.Timeout           = 1; // seconds to wait for new records
-    rjd.BytesToWaitFor    = 1;
-    rjd.UsnJournalID      = jd.UsnJournalID;
+    rjd.Timeout = 1;  // seconds to wait for new records
+    rjd.BytesToWaitFor = 1;
+    rjd.UsnJournalID = jd.UsnJournalID;
 
     constexpr DWORD bufSize = 512 * 1024;
     std::vector<BYTE> buf(bufSize);
 
     while (!stopToken.load(std::memory_order_relaxed)) {
         DWORD bytesReturned = 0;
-        if (!DeviceIoControl(hVol, FSCTL_READ_USN_JOURNAL,
-                              &rjd, sizeof(rjd),
-                              buf.data(), bufSize, &bytesReturned, nullptr)) {
+        if (!DeviceIoControl(hVol, FSCTL_READ_USN_JOURNAL, &rjd, sizeof(rjd), buf.data(), bufSize,
+                             &bytesReturned, nullptr)) {
             break;
         }
-        if (bytesReturned <= sizeof(USN)) continue;
+        if (bytesReturned <= sizeof(USN))
+            continue;
 
         rjd.StartUsn = *reinterpret_cast<USN*>(buf.data());
 
@@ -145,14 +148,15 @@ void UsnJournalMonitor::StartMonitoring(const std::wstring& root,
             else
                 evt.type = FileChangeType::Modified;
 
-            if (onChange) onChange(evt);
+            if (onChange)
+                onChange(evt);
 
-            record = reinterpret_cast<USN_RECORD*>(
-                reinterpret_cast<BYTE*>(record) + record->RecordLength);
+            record = reinterpret_cast<USN_RECORD*>(reinterpret_cast<BYTE*>(record) +
+                                                   record->RecordLength);
         }
     }
 
     CloseHandle(hVol);
 }
 
-} // namespace winindex
+}  // namespace winindex

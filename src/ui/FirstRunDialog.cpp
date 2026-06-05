@@ -1,7 +1,9 @@
 #include "FirstRunDialog.h"
-#include "resource.h"
+
 #include <commctrl.h>
 #include <shlobj.h>
+
+#include "resource.h"
 #include <algorithm>
 
 namespace winindex {
@@ -14,16 +16,12 @@ FirstRunDialog::FirstRunDialog(HWND hParent, std::shared_ptr<Settings> settings)
 bool FirstRunDialog::Show() {
     INT_PTR result = DialogBoxParamW(
         reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(m_hParent, GWLP_HINSTANCE)),
-        MAKEINTRESOURCEW(IDD_FIRSTRUN),
-        m_hParent,
-        DlgProc,
-        reinterpret_cast<LPARAM>(this));
+        MAKEINTRESOURCEW(IDD_FIRSTRUN), m_hParent, DlgProc, reinterpret_cast<LPARAM>(this));
     return result == IDOK;
 }
 
 INT_PTR CALLBACK FirstRunDialog::DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    FirstRunDialog* self = reinterpret_cast<FirstRunDialog*>(
-        GetWindowLongPtrW(hwnd, DWLP_USER));
+    FirstRunDialog* self = reinterpret_cast<FirstRunDialog*>(GetWindowLongPtrW(hwnd, DWLP_USER));
 
     switch (msg) {
         case WM_INITDIALOG:
@@ -34,7 +32,8 @@ INT_PTR CALLBACK FirstRunDialog::DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
         case WM_COMMAND:
             switch (LOWORD(wp)) {
                 case IDOK:
-                    if (self) self->OnOk(hwnd);
+                    if (self)
+                        self->OnOk(hwnd);
                     EndDialog(hwnd, IDOK);
                     return TRUE;
                 case IDCANCEL:
@@ -45,23 +44,23 @@ INT_PTR CALLBACK FirstRunDialog::DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
                     if (self) {
                         bool manualOnly = IsDlgButtonChecked(hwnd, IDC_MANUAL_ONLY) == BST_CHECKED;
                         EnableWindow(GetDlgItem(hwnd, IDC_REINDEX_INTERVAL), !manualOnly);
-                        EnableWindow(GetDlgItem(hwnd, IDC_REINDEX_UNIT),     !manualOnly);
+                        EnableWindow(GetDlgItem(hwnd, IDC_REINDEX_UNIT), !manualOnly);
                     }
                     return TRUE;
                 case IDC_EXCL_ADD: {
                     wchar_t path[MAX_PATH]{};
                     BROWSEINFOW bi{};
-                    bi.hwndOwner      = hwnd;
+                    bi.hwndOwner = hwnd;
                     bi.pszDisplayName = path;
-                    bi.lpszTitle      = L"Select folder to exclude:";
-                    bi.ulFlags        = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+                    bi.lpszTitle = L"Select folder to exclude:";
+                    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
                     PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&bi);
                     if (pidl) {
                         wchar_t fullPath[MAX_PATH]{};
                         if (SHGetPathFromIDListW(pidl, fullPath)) {
                             HWND hList = GetDlgItem(hwnd, IDC_EXCL_LIST);
                             SendMessageW(hList, LB_ADDSTRING, 0,
-                                          reinterpret_cast<LPARAM>(fullPath));
+                                         reinterpret_cast<LPARAM>(fullPath));
                         }
                         CoTaskMemFree(pidl);
                     }
@@ -70,7 +69,8 @@ INT_PTR CALLBACK FirstRunDialog::DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
                 case IDC_EXCL_REMOVE: {
                     HWND hList = GetDlgItem(hwnd, IDC_EXCL_LIST);
                     int sel = static_cast<int>(SendMessageW(hList, LB_GETCURSEL, 0, 0));
-                    if (sel != LB_ERR) SendMessageW(hList, LB_DELETESTRING, sel, 0);
+                    if (sel != LB_ERR)
+                        SendMessageW(hList, LB_DELETESTRING, sel, 0);
                     return TRUE;
                 }
             }
@@ -86,12 +86,12 @@ void FirstRunDialog::OnInit(HWND hwnd) {
 
     for (const auto& drive : m_drives) {
         std::wstring label = drive.root;
-        if (!drive.label.empty()) label += L" (" + drive.label + L")";
+        if (!drive.label.empty())
+            label += L" (" + drive.label + L")";
         label += (drive.filesystem == DriveFilesystem::NTFS) ? L" [NTFS]" : L" [FAT32]";
 
         int idx = static_cast<int>(
-            SendMessageW(hDriveList, LB_ADDSTRING, 0,
-                          reinterpret_cast<LPARAM>(label.c_str())));
+            SendMessageW(hDriveList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str())));
 
         // Pre-check C: drive
         bool isC = (drive.root == L"C:\\" || drive.root == L"C:/");
@@ -105,13 +105,12 @@ void FirstRunDialog::OnInit(HWND hwnd) {
     HWND hUnit = GetDlgItem(hwnd, IDC_REINDEX_UNIT);
     SendMessageW(hUnit, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Hours"));
     SendMessageW(hUnit, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Days"));
-    SendMessageW(hUnit, CB_SETCURSEL, 0, 0); // Hours default
+    SendMessageW(hUnit, CB_SETCURSEL, 0, 0);  // Hours default
 
     // Exclusion list
     HWND hExclList = GetDlgItem(hwnd, IDC_EXCL_LIST);
     for (const auto& excl : m_settings->GetExcludedPaths()) {
-        SendMessageW(hExclList, LB_ADDSTRING, 0,
-                      reinterpret_cast<LPARAM>(excl.c_str()));
+        SendMessageW(hExclList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(excl.c_str()));
     }
 }
 
@@ -134,9 +133,10 @@ void FirstRunDialog::OnOk(HWND hwnd) {
         wchar_t buf[32]{};
         GetDlgItemTextW(hwnd, IDC_REINDEX_INTERVAL, buf, 32);
         uint64_t val = _wtoi64(buf);
-        int unitSel = static_cast<int>(
-            SendMessageW(GetDlgItem(hwnd, IDC_REINDEX_UNIT), CB_GETCURSEL, 0, 0));
-        if (unitSel == 1) val *= 24; // Days -> hours
+        int unitSel =
+            static_cast<int>(SendMessageW(GetDlgItem(hwnd, IDC_REINDEX_UNIT), CB_GETCURSEL, 0, 0));
+        if (unitSel == 1)
+            val *= 24;  // Days -> hours
         m_settings->SetReindexIntervalHours(val > 0 ? val : kReindexDefaultHours);
     }
 
@@ -153,4 +153,4 @@ void FirstRunDialog::OnOk(HWND hwnd) {
     m_settings->SetExcludedPaths(excls);
 }
 
-} // namespace winindex
+}  // namespace winindex

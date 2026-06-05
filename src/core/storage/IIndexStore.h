@@ -1,7 +1,7 @@
 #pragma once
 #include "../indexer/IFileSystemScanner.h"
-#include <vector>
 #include <cstdint>
+#include <vector>
 
 namespace winindex {
 
@@ -45,11 +45,10 @@ public:
     /// @brief Incrementally renames an entry (e.g. from a USN Renamed event).
     /// @param oldPath Previous full path.
     /// @param newPath New full path.
-    virtual void ApplyRename(const std::wstring& oldPath,
-                              const std::wstring& newPath) = 0;
+    virtual void ApplyRename(const std::wstring& oldPath, const std::wstring& newPath) = 0;
 
     /// @brief Returns the number of entries currently held in the store.
-    virtual uint64_t         GetEntryCount() const = 0;
+    virtual uint64_t GetEntryCount() const = 0;
 
     /// @brief Returns a read-only pointer to the flat entry array.
     ///
@@ -66,4 +65,4 @@ public:
     virtual void SetSavedUsn(const std::wstring& root, uint64_t usn) = 0;
 };
 
-} // namespace winindex
+}  // namespace winindex
