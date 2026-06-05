@@ -54,7 +54,7 @@ endif()
 
 # MSVC-specific flags — applied after FetchContent so third-party code is unaffected
 if(MSVC)
-    add_compile_options(/W4 /WX /permissive-)
+    add_compile_options(/W4 /WX /permissive- /sdl /GS)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 endif()
 
@@ -63,8 +63,17 @@ add_subdirectory(src/core)
 add_subdirectory(src/ui)
 add_subdirectory(tests)
 
+# ---------- Optional documentation ----------
+option(BUILD_DOCS "Build Doxygen documentation" OFF)
+if(BUILD_DOCS)
+    find_package(Doxygen)
+    if(DOXYGEN_FOUND)
+        doxygen_add_docs(docs ${CMAKE_SOURCE_DIR}/src COMMENT "Generate API docs")
+    endif()
+endif()
+
 # ---------- CPack / packaging ----------
-include(CPack)
+# CPACK_* variables must be set before include(CPack)
 set(CPACK_PACKAGE_NAME "winindex")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_VENDOR "winindex contributors")
@@ -78,3 +87,4 @@ set(CPACK_NSIS_CREATE_ICONS_EXTRA
     "CreateShortCut '$SMPROGRAMS\\\\winindex\\\\winindex.lnk' '$INSTDIR\\\\bin\\\\winindex.exe'")
 set(CPACK_NSIS_DELETE_ICONS_EXTRA
     "Delete '$SMPROGRAMS\\\\winindex\\\\winindex.lnk'")
+include(CPack)

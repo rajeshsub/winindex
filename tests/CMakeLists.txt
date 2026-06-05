@@ -22,8 +22,6 @@ target_link_libraries(winindex_tests
 
 target_include_directories(winindex_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
 
 include(GoogleTest)

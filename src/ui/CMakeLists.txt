@@ -28,4 +28,8 @@ set_target_properties(winindex PROPERTIES
     LINK_FLAGS "/MANIFEST:EMBED /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/winindex.manifest"
 )
 
+if(MSVC)
+    target_link_options(winindex PRIVATE /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA)
+endif()
+
 install(TARGETS winindex DESTINATION bin)
