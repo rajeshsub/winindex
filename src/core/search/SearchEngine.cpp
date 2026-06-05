@@ -1,6 +1,7 @@
 #include "SearchEngine.h"
 
 #include "SimdSearch.h"
+#include "TokenMatcher.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
@@ -21,20 +22,6 @@ std::string SearchEngine::WideToUtf8(const std::wstring& s) {
     std::string r(sz - 1, '\0');
     WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, r.data(), sz, nullptr, nullptr);
     return r;
-}
-
-// Very basic diacritic normalization via NFC -> ASCII fold using WinAPI
-std::wstring SearchEngine::NormalizeDiacritics(const std::wstring& s) {
-    // FoldString with MAP_PRECOMPOSED + custom: use LCMapString for normalization
-    int needed =
-        LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LINGUISTIC_CASING | LCMAP_LOWERCASE, s.c_str(),
-                      static_cast<int>(s.size()), nullptr, 0, nullptr, nullptr, 0);
-    if (needed <= 0)
-        return s;
-    std::wstring result(needed, L'\0');
-    LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LINGUISTIC_CASING | LCMAP_LOWERCASE, s.c_str(),
-                  static_cast<int>(s.size()), result.data(), needed, nullptr, nullptr, 0);
-    return result;
 }
 
 bool SearchEngine::MatchesWholeWord(const std::wstring& text, size_t pos, size_t len) {
@@ -120,6 +107,19 @@ std::vector<SearchResult> SearchEngine::SearchSubstring(
         return q;
     }();
 
+    // Token-set matching: pre-compute once, shared read-only across threads.
+    // Only activated when the query contains separator chars (space/_/-/.)
+    // so single-word queries take the unmodified SIMD-only path.
+    const bool doTokenMatch = !options.caseSensitive && TokenMatcher::QueryHasSeparators(query);
+    // lowercaseQuery owns the storage that sortedQueryTokens views reference.
+    std::wstring lowercaseQuery;
+    std::vector<std::wstring_view> sortedQueryTokens;
+    if (doTokenMatch) {
+        lowercaseQuery = needle;  // needle is already lowercased at this point
+        sortedQueryTokens = TokenMatcher::TokenizeView(lowercaseQuery);
+        std::sort(sortedQueryTokens.begin(), sortedQueryTokens.end());
+    }
+
     unsigned int numThreads = std::max(1u, std::thread::hardware_concurrency());
     uint64_t chunkSize = (entryCount + numThreads - 1) / numThreads;
 
@@ -166,11 +166,23 @@ std::vector<SearchResult> SearchEngine::SearchSubstring(
 
                     size_t pos =
                         SimdFindSubstring(haystackData, haystackLen, needle.c_str(), needle.size());
-                    if (pos == std::wstring::npos)
-                        continue;
 
-                    if (options.wholeWord) {
-                        // Reconstruct wstring view for word-boundary check
+                    bool tokenMatch = false;
+                    if (pos == std::wstring::npos) {
+                        // Token-set fallback: fires only when SIMD missed and the query
+                        // had separators (e.g. "just rosy", "rosy guitar flac").
+                        if (!doTokenMatch)
+                            continue;
+                        std::wstring haystackStr(haystackData, haystackLen);
+                        auto fnTokens = TokenMatcher::TokenizeView(haystackStr);
+                        std::sort(fnTokens.begin(), fnTokens.end());
+                        if (!TokenMatcher::AllQueryTokensPresent(sortedQueryTokens, fnTokens))
+                            continue;
+                        tokenMatch = true;
+                        pos = 0;
+                    }
+
+                    if (options.wholeWord && !tokenMatch) {
                         std::wstring_view hayView(haystackData, haystackLen);
                         if (!MatchesWholeWord(std::wstring(hayView), pos, needle.size()))
                             continue;
@@ -179,7 +191,7 @@ std::vector<SearchResult> SearchEngine::SearchSubstring(
                     SearchResult sr;
                     sr.entry = &e;
                     sr.matchStart = static_cast<uint32_t>(pos);
-                    sr.matchLen = static_cast<uint32_t>(needle.size());
+                    sr.matchLen = tokenMatch ? 0u : static_cast<uint32_t>(needle.size());
                     local.push_back(sr);
                 }
                 return local;
@@ -191,7 +203,7 @@ std::vector<SearchResult> SearchEngine::SearchSubstring(
 
     for (auto& f : futures) {
         auto chunk = f.get();
-        for (auto& sr : chunk) {
+        for (const auto& sr : chunk) {
             if (results.size() >= maxResults)
                 goto done;
             results.push_back(sr);

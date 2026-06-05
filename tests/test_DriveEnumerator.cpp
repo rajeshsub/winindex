@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+
 #include "indexer/DriveEnumerator.h"
 
 using namespace winindex;

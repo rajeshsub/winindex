@@ -58,6 +58,8 @@ if(ENABLE_ASAN)
         message(FATAL_ERROR "ENABLE_ASAN is only supported with MSVC.")
     endif()
     add_compile_options(/fsanitize=address)
+    # /INCREMENTAL is incompatible with ASAN metadata; suppress LNK4300 by disabling it.
+    add_link_options(/INCREMENTAL:NO)
     # Abseil/RE2/GTest are built without ASAN so their STL annotation values are 0.
     # Disable all MSVC STL annotations in our code to match; otherwise LNK2038 at link.
     add_compile_definitions(
