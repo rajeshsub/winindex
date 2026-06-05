@@ -5,6 +5,7 @@
 #include "../core/indexer/FindFileScanner.h"
 #include "../core/indexer/UsnJournalMonitor.h"
 #include "../core/settings/PathUtils.h"
+#include "../core/settings/Logger.h"
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <shlobj.h>
@@ -55,6 +56,8 @@ void MainWindow::OnCreate() {
 
     m_settings    = std::make_shared<Settings>(portable, exeDir);
     m_settings->Load();
+    Logger::Instance().Init(m_settings->GetDataDirectory() + L"\\winindex.log");
+    Logger::Instance().Log(L"Application started.");
     m_indexStore  = std::make_shared<IndexStore>(m_settings);
     m_searchEngine= std::make_shared<SearchEngine>();
 
@@ -208,7 +211,17 @@ void MainWindow::OnCommand(WORD id) {
 
         case ID_HELP_OPENLOG: {
             std::wstring log = m_settings->GetDataDirectory() + L"\\winindex.log";
-            ShellExecuteW(m_hwnd, L"open", log.c_str(), nullptr, nullptr, SW_SHOW);
+            // Ensure file exists before asking the shell to open it
+            HANDLE h = CreateFileW(log.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+                                    nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+            HINSTANCE r = ShellExecuteW(m_hwnd, L"open", log.c_str(),
+                                         nullptr, nullptr, SW_SHOW);
+            if (reinterpret_cast<INT_PTR>(r) <= 32) {
+                MessageBoxW(m_hwnd,
+                    (L"Could not open log file:\n" + log).c_str(),
+                    L"winindex", MB_OK | MB_ICONWARNING);
+            }
             break;
         }
 
@@ -287,7 +300,8 @@ void MainWindow::OnSearchResults(std::vector<SearchResult>* results) {
 }
 
 void MainWindow::OnIndexerStatus(const IndexerStatus& status) {
-    // Enable/disable search bar based on whether index is available
+    Logger::Instance().Log(status.message);
+
     bool hasIndex = (status.state == IndexerState::WatchingForChanges ||
                      status.state == IndexerState::Idle);
     EnableWindow(m_hSearchBar, hasIndex ? TRUE : FALSE);

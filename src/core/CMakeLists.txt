@@ -11,6 +11,7 @@ add_library(winindex_core STATIC
     storage/IndexSerializer.cpp
     settings/Settings.cpp
     settings/PathUtils.cpp
+    settings/Logger.cpp
 )
 
 target_include_directories(winindex_core
