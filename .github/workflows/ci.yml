@@ -15,11 +15,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install LLVM (clang-format)
+        run: choco install llvm --version=18.1.8 --no-progress -y
+
       - name: Check clang-format
-        uses: jidicula/clang-format-action@v4.13.0
-        with:
-          clang-format-version: '18'
-          check-path: 'src'
+        run: |
+          $files = Get-ChildItem -Path src -Recurse -Include *.cpp,*.h,*.hpp | Select-Object -ExpandProperty FullName
+          $failed = @()
+          foreach ($f in $files) {
+            & clang-format --style=file --dry-run --Werror $f 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { $failed += $f }
+          }
+          if ($failed.Count -gt 0) {
+            Write-Host "clang-format violations in:"
+            $failed | ForEach-Object { Write-Host "  $_" }
+            exit 1
+          }
 
       - name: Install cppcheck
         run: choco install cppcheck --no-progress -y
