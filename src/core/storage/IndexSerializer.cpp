@@ -1,6 +1,7 @@
 #include "IndexSerializer.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <algorithm>
 #include <fstream>
 #include <vector>
 #include <cstring>
@@ -151,6 +152,8 @@ bool IndexSerializer::Deserialize(
         e.lastModified = readU64();
         e.attributes   = readU32();
         e.name = readWStr(nameLen);
+        e.nameLower = e.name;
+        std::transform(e.nameLower.begin(), e.nameLower.end(), e.nameLower.begin(), ::towlower);
         e.path = readWStr(pathLen);
     }
 

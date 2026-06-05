@@ -10,6 +10,7 @@ namespace winindex {
 /// @brief Represents a single file entry in the index.
 struct FileEntry {
     std::wstring name;          ///< Filename only (no directory components).
+    std::wstring nameLower;     ///< Pre-computed lowercase name for zero-allocation case-insensitive search.
     std::wstring path;          ///< Full absolute path including filename.
     uint64_t     size;          ///< File size in bytes.
     uint64_t     lastModified;  ///< Last-write time as FILETIME (100-ns intervals since 1601-01-01).

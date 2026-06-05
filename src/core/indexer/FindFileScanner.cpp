@@ -87,6 +87,8 @@ void FindFileScanner::ScanDirectory(const std::wstring& dir,
             } else {
                 FileEntry fe;
                 fe.name         = fd.cFileName;
+                fe.nameLower    = fe.name;
+                std::transform(fe.nameLower.begin(), fe.nameLower.end(), fe.nameLower.begin(), ::towlower);
                 fe.path         = fullPath;
                 fe.size         = (static_cast<uint64_t>(fd.nFileSizeHigh) << 32) | fd.nFileSizeLow;
                 fe.lastModified = FileTimeToUint64(fd.ftLastWriteTime);
