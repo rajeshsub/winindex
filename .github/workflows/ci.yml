@@ -8,31 +8,176 @@ on:
     branches: [ main ]
 
 jobs:
-  build-and-test:
+  lint:
     runs-on: windows-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check clang-format
+        uses: jidicula/clang-format-action@v4.13.0
+        with:
+          clang-format-version: '18'
+          check-path: 'src'
+
+      - name: Install cppcheck
+        run: choco install cppcheck --no-progress -y
+
+      - name: Run cppcheck
+        run: >
+          cppcheck
+          --enable=warning,style,performance
+          --std=c++20
+          --suppress=missingIncludeSystem
+          --error-exitcode=1
+          src/
+
+      - name: Cache FetchContent dependencies (analyze)
+        uses: actions/cache@v4
+        with:
+          path: build/analyze/_deps
+          key: fetchcontent-analyze-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: fetchcontent-analyze-
+
+      - name: Install Ninja
+        run: choco install ninja --no-progress -y
+
+      - name: Configure (analyze preset)
+        run: cmake --preset windows-msvc-ci-analyze
+
+      - name: Run clang-tidy
+        run: |
+          $files = Get-ChildItem -Path src -Recurse -Include *.cpp | Select-Object -ExpandProperty FullName
+          foreach ($f in $files) {
+            clang-tidy -p build/analyze/compile_commands.json $f
+          }
+
+  build-debug:
+    needs: lint
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/debug/_deps
+          key: fetchcontent-debug-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: fetchcontent-debug-
+
       - name: Configure CMake
-        run: cmake -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build/debug -A x64 -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build/debug --config Debug --parallel
 
       - name: Run Tests
-        working-directory: build
-        run: ctest -C Release --output-on-failure
+        working-directory: build/debug
+        run: ctest -C Debug --output-on-failure
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-debug
+          path: build/debug/Testing/
+
+  build-release:
+    needs: lint
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/release/_deps
+          key: fetchcontent-release-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: fetchcontent-release-
+
+      - name: Configure CMake
+        run: cmake -B build/release -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/release --config Release --parallel
+
+      - name: Install OpenCppCoverage
+        run: choco install opencppcoverage --no-progress -y
+
+      - name: Run Tests with Coverage
+        run: >
+          OpenCppCoverage.exe
+          --sources "${{ github.workspace }}\src"
+          --export_type=cobertura:build/release/coverage.xml
+          -- ctest --test-dir build/release -C Release --output-on-failure
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: build/release/coverage.xml
+          fail_ci_if_error: false
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-release
+          path: build/release/Testing/
+
+  build-asan:
+    needs: lint
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/asan/_deps
+          key: fetchcontent-asan-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: fetchcontent-asan-
+
+      - name: Configure CMake (ASAN Debug)
+        run: >
+          cmake -B build/asan -A x64
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="/fsanitize=address"
+          -DCMAKE_EXE_LINKER_FLAGS="/fsanitize=address"
+
+      - name: Build
+        run: cmake --build build/asan --config Debug --parallel
+
+      - name: Test (ASAN)
+        working-directory: build/asan
+        env:
+          ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1"
+        # Exclude OS-level storage tests that may produce false positives from Win32 APIs
+        run: ctest -C Debug --output-on-failure --gtest_filter=-*DriveEnumerator*:-*Indexer*
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-and-test
+    needs: [build-debug, build-release]
     runs-on: windows-latest
+    timeout-minutes: 30
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: fetchcontent-release-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: fetchcontent-release-
 
       - name: Configure CMake
         run: cmake -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=install

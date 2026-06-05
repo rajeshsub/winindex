@@ -9,3 +9,4 @@ install/
 *.log
 build_out.txt
 build_output.txt
+docs/doxygen/

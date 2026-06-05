@@ -2,6 +2,16 @@
   "version": 3,
   "configurePresets": [
     {
+      "name": "windows-msvc-ci-analyze",
+      "displayName": "MSVC CI analyze (Ninja, Release)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/analyze",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
       "name": "windows-msvc-debug",
       "displayName": "MSVC Debug",
       "generator": "Visual Studio 18 2026",

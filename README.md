@@ -185,6 +185,33 @@ winindex/
 
 ---
 
+## Releases
+
+Tagged releases (`v*`) trigger the CI release job which produces:
+
+- **ZIP** — portable build, extract and run
+- **NSIS installer** — installs to `Program Files`, creates a Start Menu shortcut
+
+---
+
+## Development setup
+
+After cloning:
+
+```powershell
+winget install Python.Python.3.12 LLVM.LLVM Cppcheck.Cppcheck
+pip install pre-commit
+pre-commit install
+```
+
+To run all checks on the full codebase (one-time cleanup):
+
+```powershell
+pre-commit run --all-files
+```
+
+---
+
 ## License
 
 MIT
