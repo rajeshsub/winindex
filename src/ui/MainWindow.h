@@ -31,11 +31,14 @@ public:
     void OnContextMenu(HWND hwndFrom, int x, int y);
     void OnSearchChanged();  // called from SearchBar on text change
     void OnListDblClick();
-    void OnListKeyDown(NMLVKEYDOWN* kd);
+    void OnListKeyDown(const NMLVKEYDOWN* kd);
     void OnIndexerStatus(const IndexerStatus& status);
     void OnSearchResults(std::vector<SearchResult>* results);
+    void OnDeviceChange(WPARAM event, LPARAM lp);
 
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+    static LRESULT CALLBACK SearchBarSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
+                                                  UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
 
 private:
     HWND m_hwnd = nullptr;
@@ -57,11 +60,12 @@ private:
     static constexpr UINT kDebounceMs = 150;
     std::atomic<bool> m_searchCancel{false};
     std::thread m_searchThread;
+    HDEVNOTIFY m_hDevNotify = nullptr;
 
     void InitControls();
     void UpdateMenuCheckmarks();
     void TriggerSearch();
-    void ExecuteSearch(std::wstring query);
+    void ExecuteSearch(const std::wstring& query);
     void OpenSelectedFile();
     void OpenContainingFolder();
     void CopySelectedPaths(bool filenameOnly);

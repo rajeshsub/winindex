@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include <commctrl.h>
+#include <dbt.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shlwapi.h>
@@ -46,6 +47,8 @@ HWND MainWindow::Create(HINSTANCE hInst) {
 MainWindow::MainWindow(HWND hwnd) : m_hwnd(hwnd) {}
 
 MainWindow::~MainWindow() {
+    if (m_hDevNotify)
+        UnregisterDeviceNotification(m_hDevNotify);
     m_searchCancel.store(true);
     if (m_searchThread.joinable())
         m_searchThread.join();
@@ -86,6 +89,12 @@ void MainWindow::OnCreate() {
     }
 
     m_indexer->StartIndexing();
+
+    DEV_BROADCAST_DEVICEINTERFACE filter{};
+    filter.dbcc_size = sizeof(filter);
+    filter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+    m_hDevNotify = RegisterDeviceNotificationW(
+        m_hwnd, &filter, DEVICE_NOTIFY_WINDOW_HANDLE | DEVICE_NOTIFY_ALL_INTERFACE_CLASSES);
 }
 
 void MainWindow::InitControls() {
@@ -100,6 +109,7 @@ void MainWindow::InitControls() {
                               OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                               DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     SendMessageW(m_hSearchBar, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
+    SetWindowSubclass(m_hSearchBar, SearchBarSubclassProc, 1, reinterpret_cast<DWORD_PTR>(this));
 
     // ListView (virtual, owner-data)
     m_hListView = CreateWindowExW(
@@ -281,7 +291,7 @@ void MainWindow::TriggerSearch() {
         ExecuteSearch(query);
 }
 
-void MainWindow::ExecuteSearch(std::wstring query) {
+void MainWindow::ExecuteSearch(const std::wstring& query) {
     m_searchCancel.store(true);
     if (m_searchThread.joinable())
         m_searchThread.join();
@@ -341,7 +351,7 @@ void MainWindow::OnListDblClick() {
     ShellExecuteW(m_hwnd, L"open", entry->path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
-void MainWindow::OnListKeyDown(NMLVKEYDOWN* kd) {
+void MainWindow::OnListKeyDown(const NMLVKEYDOWN* kd) {
     if (!kd)
         return;
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -416,11 +426,6 @@ void MainWindow::OpenContainingFolder() {
     if (sel < 0 || sel >= static_cast<int>(m_currentResults.size()))
         return;
     const FileEntry* entry = m_currentResults[sel].entry;
-
-    std::wstring dir = entry->path;
-    size_t slash = dir.rfind(L'\\');
-    if (slash != std::wstring::npos)
-        dir = dir.substr(0, slash);
 
     // Open Explorer with file selected
     PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(entry->path.c_str());
@@ -539,6 +544,50 @@ void MainWindow::SetStatusText(const std::wstring& text) {
     SendMessageW(m_hStatusBar, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(text.c_str()));
 }
 
+void MainWindow::OnDeviceChange(WPARAM event, LPARAM lp) {
+    if (event != DBT_DEVICEARRIVAL && event != DBT_DEVICEREMOVECOMPLETE)
+        return;
+    auto* hdr = reinterpret_cast<DEV_BROADCAST_HDR*>(lp);
+    if (!hdr || hdr->dbch_devicetype != DBT_DEVTYP_VOLUME)
+        return;
+
+    auto* vol = reinterpret_cast<DEV_BROADCAST_VOLUME*>(hdr);
+    std::wstring drives;
+    for (int i = 0; i < 26; ++i) {
+        if (vol->dbcv_unitmask & (1u << i)) {
+            if (!drives.empty())
+                drives += L", ";
+            drives += static_cast<wchar_t>(L'A' + i);
+            drives += L':';
+        }
+    }
+
+    if (event == DBT_DEVICEARRIVAL) {
+        Logger::Instance().Log(L"Drive arrived: " + drives);
+        SetStatusText(L"Drive " + drives + L" connected. Open Index > Settings to add it.");
+    } else {
+        Logger::Instance().Log(L"Drive removed: " + drives);
+        SetStatusText(L"Drive " + drives + L" disconnected.");
+    }
+}
+
+LRESULT CALLBACK MainWindow::SearchBarSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
+                                                   UINT_PTR /*uIdSubclass*/, DWORD_PTR dwRefData) {
+    if (msg == WM_KEYDOWN && wp == VK_DOWN) {
+        MainWindow* mw = reinterpret_cast<MainWindow*>(dwRefData);
+        if (mw && mw->m_hListView && ListView_GetItemCount(mw->m_hListView) > 0) {
+            SetFocus(mw->m_hListView);
+            if (ListView_GetNextItem(mw->m_hListView, -1, LVNI_SELECTED) == -1) {
+                ListView_SetItemState(mw->m_hListView, 0, LVIS_SELECTED | LVIS_FOCUSED,
+                                      LVIS_SELECTED | LVIS_FOCUSED);
+                ListView_EnsureVisible(mw->m_hListView, 0, FALSE);
+            }
+        }
+        return 0;
+    }
+    return DefSubclassProc(hwnd, msg, wp, lp);
+}
+
 LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     MainWindow* self = reinterpret_cast<MainWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
 
@@ -549,6 +598,11 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
             mw->OnCreate();
             return 0;
         }
+        case WM_SETFOCUS:
+            if (self && self->m_hSearchBar)
+                SetFocus(self->m_hSearchBar);
+            return 0;
+
         case WM_SIZE:
             if (self)
                 self->OnSize(LOWORD(lp), HIWORD(lp));
@@ -572,7 +626,7 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
             return 0;
 
         case WM_NOTIFY: {
-            auto* hdr = reinterpret_cast<NMHDR*>(lp);
+            const auto* hdr = reinterpret_cast<const NMHDR*>(lp);
             if (!self)
                 break;
             if (hdr->idFrom == IDC_LISTVIEW) {
@@ -581,7 +635,7 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                         self->OnListDblClick();
                         break;
                     case LVN_KEYDOWN:
-                        self->OnListKeyDown(reinterpret_cast<NMLVKEYDOWN*>(lp));
+                        self->OnListKeyDown(reinterpret_cast<const NMLVKEYDOWN*>(lp));
                         break;
                     case LVN_GETDISPINFOW: {
                         auto* di = reinterpret_cast<NMLVDISPINFOW*>(lp);
@@ -658,6 +712,11 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                 self->OnSearchResults(r);
             return 0;
         }
+
+        case WM_DEVICECHANGE:
+            if (self)
+                self->OnDeviceChange(wp, lp);
+            return TRUE;
 
         case WM_DESTROY:
             if (self) {

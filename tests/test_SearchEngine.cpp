@@ -225,6 +225,18 @@ TEST_F(TokenSetMatchTest, LedZepPlusFlac) {
     EXPECT_EQ(r[0].entry->name, kLedZepName);
 }
 
+TEST_F(TokenSetMatchTest, TokenOrderIrrelevant_GuitarFirst) {
+    auto r = engine.Search(L"just guitar rosy", entries.data(), entries.size(), opts, 100, cancel);
+    ASSERT_EQ(r.size(), 1u);
+    EXPECT_EQ(r[0].entry->name, kLedZepName);
+}
+
+TEST_F(TokenSetMatchTest, TokenOrderIrrelevant_RosyFirst) {
+    auto r = engine.Search(L"rosy just guitar", entries.data(), entries.size(), opts, 100, cancel);
+    ASSERT_EQ(r.size(), 1u);
+    EXPECT_EQ(r[0].entry->name, kLedZepName);
+}
+
 TEST_F(TokenSetMatchTest, AllTokensMustMatch_NegativeCase) {
     // "piano" is not in the filename — should not match
     auto r = engine.Search(L"just rosy piano", entries.data(), entries.size(), opts, 100, cancel);
