@@ -44,6 +44,12 @@
 #define IDC_EXCL_ADD 3006
 #define IDC_EXCL_REMOVE 3007
 
+// Settings dialog (paths-to-index section)
+#define IDC_PATH_LIST 3010
+#define IDC_PATH_ADD_DRIVE 3011
+#define IDC_PATH_ADD_FOLDER 3012
+#define IDC_PATH_REMOVE 3013
+
 // WM_APP messages (cross-thread UI updates)
 #define WM_INDEXER_STATUS (WM_APP + 1)
 #define WM_SEARCH_RESULTS (WM_APP + 2)

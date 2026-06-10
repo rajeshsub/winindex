@@ -25,11 +25,10 @@ repos:
     rev: v1.3.5
     hooks:
       - id: cppcheck
+        exclude: '\.h$'
         args:
           - '--language=c++'
           - '--std=c++20'
           - '--enable=warning,style,performance'
-          - '--suppress=missingIncludeSystem'
-          - '--suppress=missingInclude'
           - '--error-exitcode=1'
           - '--quiet'

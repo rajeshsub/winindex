@@ -9,9 +9,7 @@
 namespace winindex {
 
 SettingsDialog::SettingsDialog(HWND hParent, std::shared_ptr<Settings> settings)
-    : m_hParent(hParent), m_settings(std::move(settings)) {
-    m_drives = EnumerateLocalFixedDrives();
-}
+    : m_hParent(hParent), m_settings(std::move(settings)) {}
 
 bool SettingsDialog::Show() {
     INT_PTR result = DialogBoxParamW(
@@ -46,6 +44,18 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
                         EnableWindow(GetDlgItem(hwnd, IDC_REINDEX_UNIT), !manual);
                     }
                     return TRUE;
+                case IDC_PATH_ADD_DRIVE:
+                    if (self)
+                        self->OnAddDrive(hwnd);
+                    return TRUE;
+                case IDC_PATH_ADD_FOLDER:
+                    if (self)
+                        self->OnAddFolder(hwnd);
+                    return TRUE;
+                case IDC_PATH_REMOVE:
+                    if (self)
+                        self->OnRemovePath(hwnd);
+                    return TRUE;
                 case IDC_EXCL_ADD:
                     if (self)
                         self->OnAddExclusion(hwnd);
@@ -63,21 +73,10 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
 void SettingsDialog::OnInit(HWND hwnd) {
     SetWindowTextW(hwnd, L"winindex — Settings");
 
-    // Drive list
-    HWND hDriveList = GetDlgItem(hwnd, IDC_DRIVE_LIST);
-    auto selected = m_settings->GetSelectedDrives();
-    for (const auto& drive : m_drives) {
-        std::wstring label = drive.root;
-        if (!drive.label.empty())
-            label += L" (" + drive.label + L")";
-        label += (drive.filesystem == DriveFilesystem::NTFS) ? L" [NTFS]" : L" [FAT32]";
-
-        int idx = static_cast<int>(
-            SendMessageW(hDriveList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str())));
-
-        bool isSel = std::find(selected.begin(), selected.end(), drive.root) != selected.end();
-        SendMessageW(hDriveList, LB_SETSEL, isSel ? TRUE : FALSE, idx);
-    }
+    // Paths-to-index list
+    HWND hPathList = GetDlgItem(hwnd, IDC_PATH_LIST);
+    for (const auto& p : m_settings->GetSelectedDrives())
+        SendMessageW(hPathList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(p.c_str()));
 
     // Reindex interval
     uint64_t interval = m_settings->GetReindexIntervalHours();
@@ -111,15 +110,17 @@ void SettingsDialog::OnInit(HWND hwnd) {
 }
 
 void SettingsDialog::OnOk(HWND hwnd) {
-    // Drives
-    HWND hDriveList = GetDlgItem(hwnd, IDC_DRIVE_LIST);
-    int count = static_cast<int>(SendMessageW(hDriveList, LB_GETCOUNT, 0, 0));
-    std::vector<std::wstring> selected;
-    for (int i = 0; i < count && i < static_cast<int>(m_drives.size()); ++i) {
-        if (SendMessageW(hDriveList, LB_GETSEL, i, 0) > 0)
-            selected.push_back(m_drives[i].root);
+    // Paths to index
+    HWND hPathList = GetDlgItem(hwnd, IDC_PATH_LIST);
+    int pathCount = static_cast<int>(SendMessageW(hPathList, LB_GETCOUNT, 0, 0));
+    std::vector<std::wstring> paths;
+    for (int i = 0; i < pathCount; ++i) {
+        int len = static_cast<int>(SendMessageW(hPathList, LB_GETTEXTLEN, i, 0));
+        std::wstring s(len, L'\0');
+        SendMessageW(hPathList, LB_GETTEXT, i, reinterpret_cast<LPARAM>(s.data()));
+        paths.push_back(std::move(s));
     }
-    m_settings->SetSelectedDrives(selected);
+    m_settings->SetSelectedDrives(paths);
 
     // Interval
     bool manualOnly = IsDlgButtonChecked(hwnd, IDC_MANUAL_ONLY) == BST_CHECKED;
@@ -147,6 +148,73 @@ void SettingsDialog::OnOk(HWND hwnd) {
         excls.push_back(std::move(s));
     }
     m_settings->SetExcludedPaths(excls);
+}
+
+void SettingsDialog::OnAddDrive(HWND hwnd) {
+    auto drives = EnumerateAllDrives();
+    if (drives.empty()) {
+        MessageBoxW(hwnd, L"No drives found.", L"winindex", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    // Build a simple picker: show each drive and let user pick one
+    std::vector<std::wstring> labels;
+    for (const auto& d : drives) {
+        std::wstring label = d.root;
+        if (!d.label.empty())
+            label += L" (" + d.label + L")";
+        labels.push_back(label);
+    }
+
+    // Use a dialog-box-style listbox via CreateDialog would be heavy;
+    // for simplicity show a message with options and use LB_FINDSTRING approach.
+    // Better: present as a popup using a simple listbox dialog.
+    // For now, use the existing folder browser pointing at "My Computer" root.
+    wchar_t path[MAX_PATH]{};
+    BROWSEINFOW bi{};
+    bi.hwndOwner = hwnd;
+    bi.pszDisplayName = path;
+    bi.lpszTitle = L"Select a drive or folder to add:";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&bi);
+    if (pidl) {
+        wchar_t fullPath[MAX_PATH]{};
+        if (SHGetPathFromIDListW(pidl, fullPath)) {
+            // Normalise to drive root if user picked a drive root
+            HWND hList = GetDlgItem(hwnd, IDC_PATH_LIST);
+            if (SendMessageW(hList, LB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),
+                             reinterpret_cast<LPARAM>(fullPath)) == LB_ERR)
+                SendMessageW(hList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(fullPath));
+        }
+        CoTaskMemFree(pidl);
+    }
+}
+
+void SettingsDialog::OnAddFolder(HWND hwnd) {
+    wchar_t path[MAX_PATH]{};
+    BROWSEINFOW bi{};
+    bi.hwndOwner = hwnd;
+    bi.pszDisplayName = path;
+    bi.lpszTitle = L"Select folder to index:";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&bi);
+    if (pidl) {
+        wchar_t fullPath[MAX_PATH]{};
+        if (SHGetPathFromIDListW(pidl, fullPath)) {
+            HWND hList = GetDlgItem(hwnd, IDC_PATH_LIST);
+            if (SendMessageW(hList, LB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),
+                             reinterpret_cast<LPARAM>(fullPath)) == LB_ERR)
+                SendMessageW(hList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(fullPath));
+        }
+        CoTaskMemFree(pidl);
+    }
+}
+
+void SettingsDialog::OnRemovePath(HWND hwnd) {
+    HWND hList = GetDlgItem(hwnd, IDC_PATH_LIST);
+    int sel = static_cast<int>(SendMessageW(hList, LB_GETCURSEL, 0, 0));
+    if (sel != LB_ERR)
+        SendMessageW(hList, LB_DELETESTRING, sel, 0);
 }
 
 void SettingsDialog::OnAddExclusion(HWND hwnd) {

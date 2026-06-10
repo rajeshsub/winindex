@@ -16,13 +16,15 @@ public:
 private:
     HWND m_hParent;
     std::shared_ptr<Settings> m_settings;
-    std::vector<DriveInfo> m_drives;
 
     static INT_PTR CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     void OnInit(HWND hwnd);
     void OnOk(HWND hwnd);
-    void OnAddExclusion(HWND hwnd);
-    void OnRemoveExclusion(HWND hwnd);
+    static void OnAddDrive(HWND hwnd);
+    static void OnAddFolder(HWND hwnd);
+    static void OnRemovePath(HWND hwnd);
+    static void OnAddExclusion(HWND hwnd);
+    static void OnRemoveExclusion(HWND hwnd);
 };
 
 }  // namespace winindex

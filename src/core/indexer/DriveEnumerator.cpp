@@ -45,10 +45,32 @@ std::vector<DriveInfo> EnumerateLocalFixedDrives() {
                               nullptr, nullptr, 0);
         info.label = label;
 
-        ULARGE_INTEGER totalBytes{}, freeBytes{};
-        GetDiskFreeSpaceExW(root, nullptr, &totalBytes, &freeBytes);
-        info.totalBytes = totalBytes.QuadPart;
-        info.freeBytes = freeBytes.QuadPart;
+        result.push_back(std::move(info));
+    }
+    return result;
+}
+
+std::vector<DriveInfo> EnumerateAllDrives() {
+    std::vector<DriveInfo> result;
+
+    DWORD mask = GetLogicalDrives();
+    for (int i = 0; i < 26; ++i) {
+        if (!(mask & (1u << i)))
+            continue;
+
+        wchar_t root[4] = {static_cast<wchar_t>(L'A' + i), L':', L'\\', L'\0'};
+        UINT driveType = GetDriveTypeW(root);
+        if (driveType != DRIVE_FIXED && driveType != DRIVE_REMOVABLE)
+            continue;
+
+        DriveInfo info;
+        info.root = root;
+        info.filesystem = GetFilesystem(root);
+
+        wchar_t label[MAX_PATH + 1] = {};
+        GetVolumeInformationW(root, label, static_cast<DWORD>(std::size(label)), nullptr, nullptr,
+                              nullptr, nullptr, 0);
+        info.label = label;
 
         result.push_back(std::move(info));
     }
