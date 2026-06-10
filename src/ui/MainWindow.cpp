@@ -335,9 +335,10 @@ void MainWindow::OnIndexerStatus(const IndexerStatus& status) {
     bool hasIndex =
         (status.state == IndexerState::WatchingForChanges || status.state == IndexerState::Idle);
     EnableWindow(m_hSearchBar, hasIndex ? TRUE : FALSE);
-    if (!hasIndex) {
+    if (hasIndex && GetFocus() != m_hListView)
+        SetFocus(m_hSearchBar);
+    if (!hasIndex)
         ListView_SetItemCount(m_hListView, 0);
-    }
     SetStatusText(status.message);
 }
 
