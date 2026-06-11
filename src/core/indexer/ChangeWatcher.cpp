@@ -97,10 +97,10 @@ void ChangeWatcher::RunWatch(const ChangeCallback& onChange) {
                     evt.type = FileChangeType::Removed;
                     break;
                 case FILE_ACTION_RENAMED_NEW_NAME:
-                    evt.type = FileChangeType::Renamed;
+                    evt.type = FileChangeType::Added;
                     break;
                 case FILE_ACTION_RENAMED_OLD_NAME:
-                    evt.type = FileChangeType::Renamed;
+                    evt.type = FileChangeType::Removed;
                     break;
                 default:
                     evt.type = FileChangeType::Modified;

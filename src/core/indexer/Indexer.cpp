@@ -47,6 +47,7 @@ void Indexer::StartIndexing(bool force) {
             EmitStatus(IndexerState::WatchingForChanges,
                        L"Index loaded - " + std::to_wstring(m_indexStore->GetEntryCount()) +
                            L" files indexed.");
+            StartLiveMonitoring();
             return;
         }
         // Index file existed but was empty or corrupt — fall through to rebuild.
@@ -110,6 +111,7 @@ void Indexer::IndexPathsThread(const std::vector<std::wstring>& paths) {
         EmitStatus(
             IndexerState::WatchingForChanges,
             L"Done - " + std::to_wstring(m_indexStore->GetEntryCount()) + L" files indexed.");
+        StartWatchersForRoots(paths);
     }
     SetEvent(m_completionEvent);
 }
@@ -140,14 +142,33 @@ void Indexer::RemovePaths(std::vector<std::wstring> paths) {
 void Indexer::RemovePathsThread(const std::vector<std::wstring>& paths) {
     EmitStatus(IndexerState::Scanning, L"Removing paths from index...");
     for (const auto& root : paths) m_indexStore->RemoveEntriesUnderPath(root);
+    StopWatchersForRoots(paths);
     m_indexStore->Save();
     EmitStatus(IndexerState::WatchingForChanges,
                L"Done - " + std::to_wstring(m_indexStore->GetEntryCount()) + L" files indexed.");
     SetEvent(m_completionEvent);
 }
 
+void Indexer::StopWatchersForRoots(const std::vector<std::wstring>& roots) {
+    std::lock_guard<std::mutex> lock(m_watchersMutex);
+    std::vector<std::unique_ptr<ChangeWatcher>> kept;
+    for (auto& w : m_watchers) {
+        bool matched = std::any_of(roots.begin(), roots.end(),
+                                   [&](const std::wstring& r) { return w->Root() == r; });
+        if (matched) {
+            w->Stop();
+        } else {
+            kept.push_back(std::move(w));
+        }
+    }
+    m_watchers = std::move(kept);
+}
+
 void Indexer::Cancel() {
     m_cancel.store(true);
+    std::lock_guard<std::mutex> lock(m_watchersMutex);
+    for (auto& w : m_watchers) w->Stop();
+    m_watchers.clear();
 }
 
 void Indexer::WaitForCompletion() {
@@ -198,7 +219,60 @@ void Indexer::IndexingThread() {
                 L".");
     }
 
+    if (!m_cancel.load(std::memory_order_relaxed))
+        StartLiveMonitoring();
     SetEvent(m_completionEvent);
+}
+
+void Indexer::ApplyChange(const FileChangeEvent& evt) {
+    if (evt.type == FileChangeType::Added || evt.type == FileChangeType::Modified) {
+        WIN32_FILE_ATTRIBUTE_DATA fad{};
+        if (!GetFileAttributesExW(evt.path.c_str(), GetFileExInfoStandard, &fad))
+            return;
+        if (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            return;
+        if (evt.type == FileChangeType::Modified)
+            m_indexStore->ApplyRemove(evt.path);
+        FileEntry fe;
+        size_t slash = evt.path.rfind(L'\\');
+        fe.name = (slash != std::wstring::npos) ? evt.path.substr(slash + 1) : evt.path;
+        fe.nameLower = fe.name;
+        std::transform(fe.nameLower.begin(), fe.nameLower.end(), fe.nameLower.begin(), ::towlower);
+        fe.path = evt.path;
+        fe.size = (static_cast<uint64_t>(fad.nFileSizeHigh) << 32) | fad.nFileSizeLow;
+        fe.lastModified = (static_cast<uint64_t>(fad.ftLastWriteTime.dwHighDateTime) << 32) |
+                          fad.ftLastWriteTime.dwLowDateTime;
+        fe.attributes = fad.dwFileAttributes;
+        m_indexStore->ApplyAdd(fe);
+    } else if (evt.type == FileChangeType::Removed) {
+        m_indexStore->ApplyRemove(evt.path);
+    }
+}
+
+void Indexer::StartLiveMonitoring() {
+    auto drives = m_settings->GetSelectedDrives();
+    if (drives.empty()) {
+        auto fixed = EnumerateLocalFixedDrives();
+        std::transform(fixed.begin(), fixed.end(), std::back_inserter(drives),
+                       [](const DriveInfo& d) { return d.root; });
+    }
+    StartWatchersForRoots(drives);
+}
+
+void Indexer::StartWatchersForRoots(const std::vector<std::wstring>& roots) {
+    for (const auto& root : roots) {
+        if (m_cancel.load(std::memory_order_relaxed))
+            return;
+        std::lock_guard<std::mutex> lock(m_watchersMutex);
+        bool exists =
+            std::any_of(m_watchers.begin(), m_watchers.end(),
+                        [&](const std::unique_ptr<ChangeWatcher>& w) { return w->Root() == root; });
+        if (exists)
+            continue;
+        auto watcher = std::make_unique<ChangeWatcher>(root);
+        watcher->Start([this](const FileChangeEvent& evt) { ApplyChange(evt); });
+        m_watchers.push_back(std::move(watcher));
+    }
 }
 
 void Indexer::ScanDrive(const std::wstring& root) {

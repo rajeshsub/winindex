@@ -6,12 +6,15 @@
 
 #include "../settings/Settings.h"
 #include "../storage/IIndexStore.h"
+#include "ChangeWatcher.h"
 #include "IFileSystemScanner.h"
 #include "IUsnJournalMonitor.h"
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
 namespace winindex {
 
@@ -60,6 +63,9 @@ private:
     void RemovePathsThread(const std::vector<std::wstring>& paths);
     void ScanDrive(const std::wstring& root);
     void ApplyChange(const FileChangeEvent& evt);
+    void StartLiveMonitoring();
+    void StartWatchersForRoots(const std::vector<std::wstring>& roots);
+    void StopWatchersForRoots(const std::vector<std::wstring>& roots);
     void EmitStatus(IndexerState state, std::wstring message, uint64_t filesIndexed = 0,
                     uint32_t skipped = 0);
 
@@ -75,6 +81,8 @@ private:
     HANDLE m_completionEvent;
     uint64_t m_filesIndexed = 0;
     uint32_t m_skippedPaths = 0;
+    std::mutex m_watchersMutex;
+    std::vector<std::unique_ptr<ChangeWatcher>> m_watchers;
 };
 
 }  // namespace winindex

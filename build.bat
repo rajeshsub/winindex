@@ -20,4 +20,3 @@ if /i "%CONFIG%"=="release" (
     echo Usage: build [release^|debug^|asan^|all^|clean]
     exit /b 1
 )
-

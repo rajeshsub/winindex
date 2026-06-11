@@ -17,6 +17,7 @@ public:
     explicit ChangeWatcher(std::wstring root);
     ~ChangeWatcher();
 
+    const std::wstring& Root() const { return m_root; }
     void Start(ChangeCallback onChange);
     void Stop();
 
