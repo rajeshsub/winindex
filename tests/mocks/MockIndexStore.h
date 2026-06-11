@@ -15,6 +15,7 @@ public:
     MOCK_METHOD(void, EndWrite, (), (override));
     MOCK_METHOD(void, ApplyAdd, (const FileEntry& e), (override));
     MOCK_METHOD(void, ApplyRemove, (const std::wstring& path), (override));
+    MOCK_METHOD(void, RemoveEntriesUnderPath, (const std::wstring& prefix), (override));
     MOCK_METHOD(void, ApplyRename, (const std::wstring& o, const std::wstring& n), (override));
     MOCK_METHOD(uint64_t, GetEntryCount, (), (const, override));
     MOCK_METHOD(const FileEntry*, GetEntries, (), (const, override));

@@ -86,6 +86,22 @@ void IndexStore::ApplyRemove(const std::wstring& path) {
                     m_entries.end());
 }
 
+void IndexStore::RemoveEntriesUnderPath(const std::wstring& prefix) {
+    std::wstring lp = prefix;
+    std::transform(lp.begin(), lp.end(), lp.begin(), ::towlower);
+    if (!lp.empty() && lp.back() != L'\\')
+        lp += L'\\';
+
+    std::lock_guard lock(m_mutex);
+    m_entries.erase(std::remove_if(m_entries.begin(), m_entries.end(),
+                                   [&](const FileEntry& e) {
+                                       std::wstring ep = e.path;
+                                       std::transform(ep.begin(), ep.end(), ep.begin(), ::towlower);
+                                       return ep.compare(0, lp.size(), lp) == 0;
+                                   }),
+                    m_entries.end());
+}
+
 void IndexStore::ApplyRename(const std::wstring& oldPath, const std::wstring& newPath) {
     std::lock_guard lock(m_mutex);
     std::wstring oldLower = oldPath;

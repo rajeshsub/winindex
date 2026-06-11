@@ -6,6 +6,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include <algorithm>
+#include <iterator>
+
 namespace winindex {
 
 Indexer::Indexer(std::shared_ptr<IFileSystemScanner> mftScanner,
@@ -16,9 +19,8 @@ Indexer::Indexer(std::shared_ptr<IFileSystemScanner> mftScanner,
       m_findScanner(std::move(findScanner)),
       m_usnMonitor(std::move(usnMonitor)),
       m_indexStore(std::move(indexStore)),
-      m_settings(std::move(settings)) {
-    m_completionEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
-}
+      m_settings(std::move(settings)),
+      m_completionEvent(CreateEventW(nullptr, TRUE, TRUE, nullptr)) {}
 
 Indexer::~Indexer() {
     Cancel();
@@ -71,6 +73,79 @@ void Indexer::StartIndexing(bool force) {
         p, 0, nullptr);
 }
 
+void Indexer::IndexPaths(std::vector<std::wstring> paths) {
+    if (IsIndexing())
+        return;
+
+    m_cancel.store(false);
+    ResetEvent(m_completionEvent);
+    m_filesIndexed = 0;
+    m_skippedPaths = 0;
+
+    struct Params {
+        Indexer* self;
+        std::vector<std::wstring> paths;
+    };
+    auto* p = new Params{this, std::move(paths)};
+    m_thread = CreateThread(
+        nullptr, 0,
+        [](LPVOID param) -> DWORD {
+            auto* p = static_cast<Params*>(param);
+            p->self->IndexPathsThread(p->paths);
+            delete p;
+            return 0;
+        },
+        p, 0, nullptr);
+}
+
+void Indexer::IndexPathsThread(const std::vector<std::wstring>& paths) {
+    EmitStatus(IndexerState::Scanning, L"Indexing new paths...");
+    for (const auto& root : paths) {
+        if (m_cancel.load(std::memory_order_relaxed))
+            break;
+        ScanDrive(root);
+    }
+    if (!m_cancel.load(std::memory_order_relaxed)) {
+        m_indexStore->Save();
+        EmitStatus(
+            IndexerState::WatchingForChanges,
+            L"Done - " + std::to_wstring(m_indexStore->GetEntryCount()) + L" files indexed.");
+    }
+    SetEvent(m_completionEvent);
+}
+
+void Indexer::RemovePaths(std::vector<std::wstring> paths) {
+    if (IsIndexing())
+        return;
+
+    m_cancel.store(false);
+    ResetEvent(m_completionEvent);
+
+    struct Params {
+        Indexer* self;
+        std::vector<std::wstring> paths;
+    };
+    auto* p = new Params{this, std::move(paths)};
+    m_thread = CreateThread(
+        nullptr, 0,
+        [](LPVOID param) -> DWORD {
+            auto* p = static_cast<Params*>(param);
+            p->self->RemovePathsThread(p->paths);
+            delete p;
+            return 0;
+        },
+        p, 0, nullptr);
+}
+
+void Indexer::RemovePathsThread(const std::vector<std::wstring>& paths) {
+    EmitStatus(IndexerState::Scanning, L"Removing paths from index...");
+    for (const auto& root : paths) m_indexStore->RemoveEntriesUnderPath(root);
+    m_indexStore->Save();
+    EmitStatus(IndexerState::WatchingForChanges,
+               L"Done - " + std::to_wstring(m_indexStore->GetEntryCount()) + L" files indexed.");
+    SetEvent(m_completionEvent);
+}
+
 void Indexer::Cancel() {
     m_cancel.store(true);
 }
@@ -102,7 +177,9 @@ void Indexer::IndexingThread() {
     if (selectedDrives.empty()) {
         // No drives configured yet (e.g., first-run dialog was skipped).
         // Fall back to all local fixed drives so the app works out of the box.
-        for (const auto& d : EnumerateLocalFixedDrives()) selectedDrives.push_back(d.root);
+        auto fixed = EnumerateLocalFixedDrives();
+        std::transform(fixed.begin(), fixed.end(), std::back_inserter(selectedDrives),
+                       [](const DriveInfo& d) { return d.root; });
     }
     for (const auto& root : selectedDrives) {
         if (m_cancel.load(std::memory_order_relaxed))
@@ -129,11 +206,9 @@ void Indexer::ScanDrive(const std::wstring& root) {
 
     // Select scanner: MFT for NTFS if admin available, FindFile otherwise
     IFileSystemScanner* scanner = m_findScanner.get();
-    bool usingMft = false;
 
     if (fs == DriveFilesystem::NTFS && m_mftScanner->IsMftAvailable(root)) {
         scanner = m_mftScanner.get();
-        usingMft = true;
         EmitStatus(IndexerState::Scanning, L"Indexing " + root + L" (MFT mode)...", m_filesIndexed);
     } else if (fs == DriveFilesystem::NTFS) {
         EmitStatus(

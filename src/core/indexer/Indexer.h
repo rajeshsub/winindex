@@ -40,6 +40,12 @@ public:
     // Start indexing in background. Non-blocking.
     void StartIndexing(bool force = false);
 
+    // Append-index new paths without clearing existing index. Non-blocking.
+    void IndexPaths(std::vector<std::wstring> paths);
+
+    // Remove all index entries under the given paths and save. Non-blocking.
+    void RemovePaths(std::vector<std::wstring> paths);
+
     // Request cancellation of in-progress indexing.
     void Cancel();
 
@@ -50,6 +56,8 @@ public:
 
 private:
     void IndexingThread();
+    void IndexPathsThread(const std::vector<std::wstring>& paths);
+    void RemovePathsThread(const std::vector<std::wstring>& paths);
     void ScanDrive(const std::wstring& root);
     void ApplyChange(const FileChangeEvent& evt);
     void EmitStatus(IndexerState state, std::wstring message, uint64_t filesIndexed = 0,
@@ -64,7 +72,7 @@ private:
     StatusCallback m_statusCallback;
     std::atomic<bool> m_cancel{false};
     HANDLE m_thread = nullptr;
-    HANDLE m_completionEvent = nullptr;
+    HANDLE m_completionEvent;
     uint64_t m_filesIndexed = 0;
     uint32_t m_skippedPaths = 0;
 };

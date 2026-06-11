@@ -42,6 +42,10 @@ public:
     /// @param path Full path of the deleted file.
     virtual void ApplyRemove(const std::wstring& path) = 0;
 
+    /// @brief Removes all entries whose path starts with @p prefix (case-insensitive).
+    /// @param prefix Drive root or folder path, e.g. L"C:\\" or L"D:\\Music\\".
+    virtual void RemoveEntriesUnderPath(const std::wstring& prefix) = 0;
+
     /// @brief Incrementally renames an entry (e.g. from a USN Renamed event).
     /// @param oldPath Previous full path.
     /// @param newPath New full path.

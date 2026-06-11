@@ -24,6 +24,7 @@ public:
     void ApplyAdd(const FileEntry& entry) override;
     void ApplyRemove(const std::wstring& path) override;
     void ApplyRename(const std::wstring& oldPath, const std::wstring& newPath) override;
+    void RemoveEntriesUnderPath(const std::wstring& prefix) override;
 
     uint64_t GetEntryCount() const override;
     const FileEntry* GetEntries() const override;

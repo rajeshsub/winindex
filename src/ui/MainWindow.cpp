@@ -15,6 +15,7 @@
 #include "FirstRunDialog.h"
 #include "SettingsDialog.h"
 #include <algorithm>
+#include <iterator>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -114,8 +115,8 @@ void MainWindow::InitControls() {
     // ListView (virtual, owner-data)
     m_hListView = CreateWindowExW(
         WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
-        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_OWNERDATA | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
-        0, 0, 0, 0, m_hwnd, reinterpret_cast<HMENU>(IDC_LISTVIEW),
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_OWNERDATA | LVS_SHOWSELALWAYS, 0, 0, 0, 0, m_hwnd,
+        reinterpret_cast<HMENU>(IDC_LISTVIEW),
         reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(m_hwnd, GWLP_HINSTANCE)), nullptr);
 
     ListView_SetExtendedListViewStyle(
@@ -223,10 +224,32 @@ void MainWindow::OnCommand(WORD id) {
             break;
 
         case ID_INDEX_SETTINGS: {
+            auto oldPaths = m_settings->GetSelectedDrives();
             SettingsDialog dlg(m_hwnd, m_settings);
             if (dlg.Show()) {
                 m_settings->Save();
                 UpdateMenuCheckmarks();
+                auto newPaths = m_settings->GetSelectedDrives();
+                std::vector<std::wstring> addedPaths;
+                std::copy_if(newPaths.begin(), newPaths.end(), std::back_inserter(addedPaths),
+                             [&](const std::wstring& q) {
+                                 return std::find(oldPaths.begin(), oldPaths.end(), q) ==
+                                        oldPaths.end();
+                             });
+                std::vector<std::wstring> removedPaths;
+                std::copy_if(oldPaths.begin(), oldPaths.end(), std::back_inserter(removedPaths),
+                             [&](const std::wstring& q) {
+                                 return std::find(newPaths.begin(), newPaths.end(), q) ==
+                                        newPaths.end();
+                             });
+                if (!addedPaths.empty() && !removedPaths.empty()) {
+                    // Both added and removed — full rebuild is simplest correct answer
+                    m_indexer->StartIndexing(true);
+                } else if (!addedPaths.empty()) {
+                    m_indexer->IndexPaths(std::move(addedPaths));
+                } else if (!removedPaths.empty()) {
+                    m_indexer->RemovePaths(std::move(removedPaths));
+                }
             }
             break;
         }
@@ -316,6 +339,7 @@ void MainWindow::OnSearchResults(std::vector<SearchResult>* results) {
     m_currentResults = std::move(*results);
     delete results;
 
+    ApplyCurrentSort();
     ListView_SetItemCount(m_hListView, static_cast<int>(m_currentResults.size()));
     InvalidateRect(m_hListView, nullptr, FALSE);
 
@@ -541,6 +565,63 @@ void MainWindow::ShowAbout() {
                 L"About winindex", MB_OK | MB_ICONINFORMATION);
 }
 
+void MainWindow::ApplyCurrentSort() {
+    if (m_sortColumn < 0 || m_currentResults.empty())
+        return;
+    int col = m_sortColumn;
+    bool desc = m_sortDescending;
+    std::sort(m_currentResults.begin(), m_currentResults.end(),
+              [col, desc](const SearchResult& a, const SearchResult& b) {
+                  int cmp = 0;
+                  switch (col) {
+                      case 0:
+                          cmp = a.entry->name.compare(b.entry->name);
+                          break;
+                      case 1:
+                          cmp = a.entry->path.compare(b.entry->path);
+                          break;
+                      case 2:
+                          cmp = (a.entry->size < b.entry->size)   ? -1
+                                : (a.entry->size > b.entry->size) ? 1
+                                                                  : 0;
+                          break;
+                      case 3:
+                          cmp = (a.entry->lastModified < b.entry->lastModified)   ? -1
+                                : (a.entry->lastModified > b.entry->lastModified) ? 1
+                                                                                  : 0;
+                          break;
+                      default:
+                          break;
+                  }
+                  return desc ? (cmp > 0) : (cmp < 0);
+              });
+}
+
+void MainWindow::OnColumnClick(int col) {
+    if (m_sortColumn == col) {
+        m_sortDescending = !m_sortDescending;
+    } else {
+        m_sortColumn = col;
+        m_sortDescending = (col == 2);  // size: large-first by default
+    }
+
+    ApplyCurrentSort();
+
+    HWND hHeader = ListView_GetHeader(m_hListView);
+    for (int i = 0; i < 4; ++i) {
+        HDITEMW hdi{};
+        hdi.mask = HDI_FORMAT;
+        Header_GetItem(hHeader, i, &hdi);
+        hdi.fmt &= ~(HDF_SORTUP | HDF_SORTDOWN);
+        if (i == m_sortColumn)
+            hdi.fmt |= (m_sortDescending ? HDF_SORTDOWN : HDF_SORTUP);
+        Header_SetItem(hHeader, i, &hdi);
+    }
+
+    ListView_SetItemCount(m_hListView, static_cast<int>(m_currentResults.size()));
+    InvalidateRect(m_hListView, nullptr, FALSE);
+}
+
 void MainWindow::SetStatusText(const std::wstring& text) {
     SendMessageW(m_hStatusBar, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(text.c_str()));
 }
@@ -634,6 +715,9 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                 switch (hdr->code) {
                     case NM_DBLCLK:
                         self->OnListDblClick();
+                        break;
+                    case LVN_COLUMNCLICK:
+                        self->OnColumnClick(reinterpret_cast<const NMLISTVIEW*>(lp)->iSubItem);
                         break;
                     case LVN_KEYDOWN:
                         self->OnListKeyDown(reinterpret_cast<const NMLVKEYDOWN*>(lp));

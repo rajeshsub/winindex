@@ -54,6 +54,8 @@ private:
 
     std::vector<SearchResult> m_currentResults;
     uint64_t m_totalMatches = 0;
+    int m_sortColumn = -1;
+    bool m_sortDescending = false;
 
     // Debounce timer
     static constexpr UINT_PTR kSearchTimerId = 1;
@@ -74,6 +76,8 @@ private:
     bool PreCheckFileExists(const FileEntry* entry);
     void ShowAbout();
     void SetStatusText(const std::wstring& text);
+    void OnColumnClick(int col);
+    void ApplyCurrentSort();
 
     static constexpr wchar_t kClassName[] = L"WinIndexMainWindow";
 };
