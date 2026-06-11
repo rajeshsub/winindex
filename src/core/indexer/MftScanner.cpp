@@ -25,17 +25,15 @@ bool MftScanner::IsExcluded(const std::wstring& path,
                             const std::vector<std::wstring>& excludedPaths) {
     std::wstring lower = path;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
-    for (const auto& excl : excludedPaths) {
+    return std::any_of(excludedPaths.begin(), excludedPaths.end(), [&](const std::wstring& excl) {
         std::wstring exclLower = excl;
         std::transform(exclLower.begin(), exclLower.end(), exclLower.begin(), ::towlower);
         if (lower == exclLower)
             return true;
         if (exclLower.back() != L'\\')
             exclLower += L'\\';
-        if (lower.starts_with(exclLower))
-            return true;
-    }
-    return false;
+        return lower.starts_with(exclLower);
+    });
 }
 
 void MftScanner::Scan(const ScanOptions& options, ScanCallback onFile, ProgressCallback onProgress,
@@ -48,7 +46,7 @@ void MftScanner::Scan(const ScanOptions& options, ScanCallback onFile, ProgressC
 }
 
 bool MftScanner::ScanVolume(const std::wstring& root, const ScanOptions& options,
-                            ScanCallback& onFile, ProgressCallback& onProgress,
+                            const ScanCallback& onFile, const ProgressCallback& onProgress,
                             const std::atomic<bool>& cancelToken) {
     std::wstring volPath = L"\\\\.\\" + root.substr(0, 2);
     HANDLE hVol = CreateFileW(volPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,

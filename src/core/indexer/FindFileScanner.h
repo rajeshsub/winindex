@@ -19,9 +19,10 @@ public:
               const std::atomic<bool>& cancelToken) override;
 
 private:
-    void ScanDirectory(const std::wstring& dir, const ScanOptions& options, ScanCallback& onFile,
-                       ProgressCallback& onProgress, uint64_t& filesFound, uint64_t& skippedCount,
-                       const std::atomic<bool>& cancelToken);
+    static void ScanDirectory(const std::wstring& dir, const ScanOptions& options,
+                              const ScanCallback& onFile, const ProgressCallback& onProgress,
+                              uint64_t& filesFound, uint64_t& skippedCount,
+                              const std::atomic<bool>& cancelToken);
 
     static bool IsExcluded(const std::wstring& path,
                            const std::vector<std::wstring>& excludedPaths);

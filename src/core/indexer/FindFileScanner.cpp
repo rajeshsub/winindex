@@ -15,19 +15,15 @@ bool FindFileScanner::IsExcluded(const std::wstring& path,
                                  const std::vector<std::wstring>& excludedPaths) {
     std::wstring lower = path;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
-    for (const auto& excl : excludedPaths) {
+    return std::any_of(excludedPaths.begin(), excludedPaths.end(), [&](const std::wstring& excl) {
         std::wstring exclLower = excl;
         std::transform(exclLower.begin(), exclLower.end(), exclLower.begin(), ::towlower);
-        // Require word-boundary: exact match OR the path is a child of the excluded dir.
-        // Without this, "C:\Program" would wrongly exclude "C:\ProgramData".
         if (lower == exclLower)
             return true;
         if (exclLower.back() != L'\\')
             exclLower += L'\\';
-        if (lower.starts_with(exclLower))
-            return true;
-    }
-    return false;
+        return lower.starts_with(exclLower);
+    });
 }
 
 void FindFileScanner::Scan(const ScanOptions& options, ScanCallback onFile,
@@ -43,7 +39,7 @@ void FindFileScanner::Scan(const ScanOptions& options, ScanCallback onFile,
 }
 
 void FindFileScanner::ScanDirectory(const std::wstring& dir, const ScanOptions& options,
-                                    ScanCallback& onFile, ProgressCallback& onProgress,
+                                    const ScanCallback& onFile, const ProgressCallback& onProgress,
                                     uint64_t& filesFound, uint64_t& skippedCount,
                                     const std::atomic<bool>& cancelToken) {
     // Iterative BFS to avoid stack overflow on deep trees

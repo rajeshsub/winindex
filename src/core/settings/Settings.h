@@ -18,14 +18,14 @@ public:
     void Save() const;
 
     // Data directory (where index + log + INI live)
-    std::wstring GetDataDirectory() const;
+    const std::wstring& GetDataDirectory() const;
 
     // Drives
-    std::vector<std::wstring> GetSelectedDrives() const;
+    const std::vector<std::wstring>& GetSelectedDrives() const;
     void SetSelectedDrives(std::vector<std::wstring> drives);
 
     // Exclusions
-    std::vector<std::wstring> GetExcludedPaths() const;
+    const std::vector<std::wstring>& GetExcludedPaths() const;
     void SetExcludedPaths(std::vector<std::wstring> paths);
 
     // Reindex interval (hours). 0 = manual only.

@@ -9,9 +9,7 @@
 namespace winindex {
 
 FirstRunDialog::FirstRunDialog(HWND hParent, std::shared_ptr<Settings> settings)
-    : m_hParent(hParent), m_settings(std::move(settings)) {
-    m_drives = EnumerateLocalFixedDrives();
-}
+    : m_hParent(hParent), m_settings(std::move(settings)), m_drives(EnumerateLocalFixedDrives()) {}
 
 bool FirstRunDialog::Show() {
     INT_PTR result = DialogBoxParamW(

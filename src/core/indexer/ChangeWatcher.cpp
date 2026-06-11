@@ -50,7 +50,7 @@ DWORD WINAPI ChangeWatcher::WatchThread(LPVOID param) {
     return 0;
 }
 
-void ChangeWatcher::RunWatch(ChangeCallback& onChange) {
+void ChangeWatcher::RunWatch(const ChangeCallback& onChange) {
     if (m_hDir == INVALID_HANDLE_VALUE)
         return;
 

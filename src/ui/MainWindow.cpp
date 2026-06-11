@@ -559,10 +559,24 @@ void MainWindow::DeleteSelectedFiles() {
 }
 
 void MainWindow::ShowAbout() {
-    MessageBoxW(m_hwnd,
-                L"winindex v0.1\n\nBlazingly fast Windows file "
-                L"search.\n\nhttps://github.com/rajeshsub/winindex",
-                L"About winindex", MB_OK | MB_ICONINFORMATION);
+    TASKDIALOGCONFIG tdc{};
+    tdc.cbSize = sizeof(tdc);
+    tdc.hwndParent = m_hwnd;
+    tdc.dwFlags = TDF_ENABLE_HYPERLINKS | TDF_ALLOW_DIALOG_CANCELLATION;
+    tdc.dwCommonButtons = TDCBF_OK_BUTTON;
+    tdc.pszWindowTitle = L"About winindex";
+    tdc.pszMainInstruction = L"winindex v0.1.2";
+    tdc.pszContent =
+        L"Blazingly fast Windows file search and indexer.\n\n"
+        L"<a href=\"https://github.com/rajeshsub/winindex\">"
+        L"https://github.com/rajeshsub/winindex</a>";
+    tdc.pfCallback = [](HWND, UINT msg, WPARAM, LPARAM lp, LONG_PTR) -> HRESULT {
+        if (msg == TDN_HYPERLINK_CLICKED)
+            ShellExecuteW(nullptr, L"open", reinterpret_cast<LPCWSTR>(lp), nullptr, nullptr,
+                          SW_SHOWNORMAL);
+        return S_OK;
+    };
+    TaskDialogIndirect(&tdc, nullptr, nullptr, nullptr);
 }
 
 void MainWindow::ApplyCurrentSort() {
@@ -745,12 +759,17 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                                 }
                                 case 2: {
                                     static thread_local std::wstring sizeBuf;
-                                    if (e->size < 1024)
-                                        sizeBuf = std::to_wstring(e->size) + L" B";
-                                    else if (e->size < 1024 * 1024)
-                                        sizeBuf = std::to_wstring(e->size / 1024) + L" KB";
+                                    wchar_t szBuf[32]{};
+                                    if (e->size < 1024ULL)
+                                        swprintf_s(szBuf, L"%llu B", e->size);
+                                    else if (e->size < 1024ULL * 1024)
+                                        swprintf_s(szBuf, L"%.2f KB", e->size / 1024.0);
+                                    else if (e->size < 1024ULL * 1024 * 1024)
+                                        swprintf_s(szBuf, L"%.2f MB", e->size / (1024.0 * 1024));
                                     else
-                                        sizeBuf = std::to_wstring(e->size / (1024 * 1024)) + L" MB";
+                                        swprintf_s(szBuf, L"%.2f GB",
+                                                   e->size / (1024.0 * 1024 * 1024));
+                                    sizeBuf = szBuf;
                                     di->item.pszText = const_cast<LPWSTR>(sizeBuf.c_str());
                                     break;
                                 }

@@ -12,8 +12,9 @@ public:
               const std::atomic<bool>& cancelToken) override;
 
 private:
-    bool ScanVolume(const std::wstring& root, const ScanOptions& options, ScanCallback& onFile,
-                    ProgressCallback& onProgress, const std::atomic<bool>& cancelToken);
+    static bool ScanVolume(const std::wstring& root, const ScanOptions& options,
+                           const ScanCallback& onFile, const ProgressCallback& onProgress,
+                           const std::atomic<bool>& cancelToken);
 
     static bool IsExcluded(const std::wstring& path,
                            const std::vector<std::wstring>& excludedPaths);

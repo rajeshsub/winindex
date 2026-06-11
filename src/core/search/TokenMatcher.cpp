@@ -6,10 +6,7 @@ namespace winindex {
 namespace TokenMatcher {
 
 bool QueryHasSeparators(const std::wstring& query) {
-    for (wchar_t c : query)
-        if (IsTokenSep(c))
-            return true;
-    return false;
+    return std::any_of(query.begin(), query.end(), IsTokenSep);
 }
 
 std::vector<std::wstring_view> TokenizeView(const std::wstring& s) {
@@ -30,11 +27,10 @@ bool AllQueryTokensPresent(const std::vector<std::wstring_view>& sortedQueryToke
                            const std::vector<std::wstring_view>& sortedFilenameTokens) {
     if (sortedQueryTokens.empty())
         return false;
-    for (const auto& qt : sortedQueryTokens) {
-        if (!std::binary_search(sortedFilenameTokens.begin(), sortedFilenameTokens.end(), qt))
-            return false;
-    }
-    return true;
+    return std::all_of(
+        sortedQueryTokens.begin(), sortedQueryTokens.end(), [&](const std::wstring_view& qt) {
+            return std::binary_search(sortedFilenameTokens.begin(), sortedFilenameTokens.end(), qt);
+        });
 }
 
 }  // namespace TokenMatcher

@@ -165,8 +165,12 @@ bool IndexSerializer::Deserialize(const std::wstring& filePath, std::vector<File
 
     if (p + sizeof(uint32_t) <= end) {
         uint32_t usnCount = readU32();
-        for (uint32_t i = 0; i < usnCount && p < end; ++i) {
+        for (uint32_t i = 0; i < usnCount; ++i) {
+            if (p + sizeof(uint16_t) > end)
+                break;
             uint16_t rootLen = readU16();
+            if (p + rootLen * sizeof(wchar_t) + sizeof(uint64_t) > end)
+                break;
             std::wstring root = readWStr(rootLen);
             uint64_t usn = readU64();
             usnMap[root] = usn;

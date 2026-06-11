@@ -23,7 +23,7 @@ Settings::Settings(bool portableMode, const std::wstring& exeDir) : m_portable(p
     m_iniPath = m_dataDir + L"\\winindex.ini";
 }
 
-std::wstring Settings::GetDataDirectory() const {
+const std::wstring& Settings::GetDataDirectory() const {
     return m_dataDir;
 }
 
@@ -84,14 +84,14 @@ void Settings::Save() const {
     WriteInt(L"Search", L"IgnoreDiacritics", m_searchOptions.ignoreDiacritics ? 1 : 0);
 }
 
-std::vector<std::wstring> Settings::GetSelectedDrives() const {
+const std::vector<std::wstring>& Settings::GetSelectedDrives() const {
     return m_selectedDrives;
 }
 void Settings::SetSelectedDrives(std::vector<std::wstring> drives) {
     m_selectedDrives = std::move(drives);
 }
 
-std::vector<std::wstring> Settings::GetExcludedPaths() const {
+const std::vector<std::wstring>& Settings::GetExcludedPaths() const {
     return m_excludedPaths;
 }
 void Settings::SetExcludedPaths(std::vector<std::wstring> paths) {

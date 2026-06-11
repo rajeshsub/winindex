@@ -33,7 +33,7 @@ private:
     };
 
     static DWORD WINAPI WatchThread(LPVOID param);
-    void RunWatch(ChangeCallback& onChange);
+    void RunWatch(const ChangeCallback& onChange);
 };
 
 }  // namespace winindex
