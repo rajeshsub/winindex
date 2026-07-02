@@ -56,49 +56,80 @@ std::vector<SearchResult> SearchEngine::SearchRegex(
     re2opts.set_encoding(RE2::Options::EncodingUTF8);
 
     std::string utf8Query = WideToUtf8(query.c_str(), query.size());
+    // Compile RE2 objects once; RE2::PartialMatch is thread-safe for concurrent reads.
     RE2 re(utf8Query, re2opts);
     if (!re.ok())
         return {};
-
     RE2 reCapture("(" + utf8Query + ")", re2opts);
+
+    unsigned int numThreads = std::max(1u, std::thread::hardware_concurrency());
+    uint64_t chunkSize = (entryCount + numThreads - 1) / numThreads;
+    std::atomic<uint32_t> collected{0};
+
+    std::vector<std::future<std::vector<SearchResult>>> futures;
+    futures.reserve(numThreads);
+
+    for (unsigned int t = 0; t < numThreads; ++t) {
+        uint64_t begin = t * chunkSize;
+        uint64_t end = std::min(begin + chunkSize, entryCount);
+        if (begin >= entryCount)
+            break;
+
+        futures.push_back(
+            std::async(std::launch::async, [&, begin, end]() -> std::vector<SearchResult> {
+                std::vector<SearchResult> local;
+                for (uint64_t i = begin; i < end; ++i) {
+                    if (cancelToken.load(std::memory_order_relaxed))
+                        break;
+                    if (collected.load(std::memory_order_relaxed) >= maxResults)
+                        break;
+
+                    const EntryMeta& m = meta[i];
+                    if (m.deleted)
+                        continue;
+
+                    const wchar_t* targetData;
+                    size_t targetLen;
+                    if (options.matchPath) {
+                        targetData = pathPool + m.pathOffset;
+                        targetLen = m.pathLen;
+                    } else {
+                        targetData = pathPool + m.pathOffset + m.nameStart;
+                        targetLen = static_cast<size_t>(m.pathLen - m.nameStart);
+                    }
+
+                    std::string utf8Target = WideToUtf8(targetData, targetLen);
+
+                    if (options.wholeWord) {
+                        re2::StringPiece match;
+                        if (!reCapture.ok() || !RE2::PartialMatch(utf8Target, reCapture, &match))
+                            continue;
+                        size_t matchPos = static_cast<size_t>(match.data() - utf8Target.data());
+                        if (!MatchesWholeWord(targetData, targetLen, matchPos, match.size()))
+                            continue;
+                    } else {
+                        if (!RE2::PartialMatch(utf8Target, re))
+                            continue;
+                    }
+
+                    local.push_back({static_cast<uint32_t>(i), 0u, 0u});
+                    collected.fetch_add(1, std::memory_order_relaxed);
+                }
+                return local;
+            }));
+    }
 
     std::vector<SearchResult> results;
     results.reserve(maxResults);
-
-    for (uint64_t i = 0; i < entryCount && !cancelToken.load(std::memory_order_relaxed); ++i) {
-        const EntryMeta& m = meta[i];
-        if (m.deleted)
-            continue;
-
-        const wchar_t* targetData;
-        size_t targetLen;
-        if (options.matchPath) {
-            targetData = pathPool + m.pathOffset;
-            targetLen = m.pathLen;
-        } else {
-            // Use name (original case) from path tail for regex matching
-            targetData = pathPool + m.pathOffset + m.nameStart;
-            targetLen = static_cast<size_t>(m.pathLen - m.nameStart);
+    for (auto& f : futures) {
+        auto chunk = f.get();
+        for (const auto& sr : chunk) {
+            if (results.size() >= maxResults)
+                goto done;
+            results.push_back(sr);
         }
-
-        std::string utf8Target = WideToUtf8(targetData, targetLen);
-
-        if (options.wholeWord) {
-            re2::StringPiece match;
-            if (!reCapture.ok() || !RE2::PartialMatch(utf8Target, reCapture, &match))
-                continue;
-            size_t matchPos = static_cast<size_t>(match.data() - utf8Target.data());
-            if (!MatchesWholeWord(targetData, targetLen, matchPos, match.size()))
-                continue;
-        } else {
-            if (!RE2::PartialMatch(utf8Target, re))
-                continue;
-        }
-
-        results.push_back({static_cast<uint32_t>(i), 0u, 0u});
-        if (results.size() >= maxResults)
-            break;
     }
+done:
     return results;
 }
 
