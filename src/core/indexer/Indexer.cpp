@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <utility>
 
 namespace winindex {
 
@@ -42,11 +43,11 @@ void Indexer::StartIndexing(bool force) {
     // Check if we need to rebuild
     if (!force && m_indexStore->IsIndexValid()) {
         EmitStatus(IndexerState::LoadingIndex, L"Loading index from disk...");
+        uint64_t ageSeconds = m_indexStore->GetIndexAgeSeconds();
         m_indexStore->Load();
         if (m_indexStore->GetEntryCount() > 0) {
-            EmitStatus(IndexerState::WatchingForChanges,
-                       L"Index loaded - " + std::to_wstring(m_indexStore->GetEntryCount()) +
-                           L" files indexed.");
+            EmitStatusDone(m_indexStore->GetEntryCount(), m_settings->GetSelectedDrives(),
+                           ageSeconds);
             StartLiveMonitoring();
             return;
         }
@@ -59,14 +60,14 @@ void Indexer::StartIndexing(bool force) {
     m_filesIndexed = 0;
     m_skippedPaths = 0;
 
-    struct Params {
+    struct IndexParams {
         Indexer* self;
     };
-    auto* p = new Params{this};
+    auto* p = new IndexParams{this};
     m_thread = CreateThread(
         nullptr, 0,
         [](LPVOID param) -> DWORD {
-            auto* p = static_cast<Params*>(param);
+            auto* p = static_cast<IndexParams*>(param);
             p->self->IndexingThread();
             delete p;
             return 0;
@@ -83,15 +84,15 @@ void Indexer::IndexPaths(std::vector<std::wstring> paths) {
     m_filesIndexed = 0;
     m_skippedPaths = 0;
 
-    struct Params {
+    struct PathsParams {
         Indexer* self;
         std::vector<std::wstring> paths;
     };
-    auto* p = new Params{this, std::move(paths)};
+    auto* p = new PathsParams{this, std::move(paths)};
     m_thread = CreateThread(
         nullptr, 0,
         [](LPVOID param) -> DWORD {
-            auto* p = static_cast<Params*>(param);
+            auto* p = static_cast<PathsParams*>(param);
             p->self->IndexPathsThread(p->paths);
             delete p;
             return 0;
@@ -108,9 +109,7 @@ void Indexer::IndexPathsThread(const std::vector<std::wstring>& paths) {
     }
     if (!m_cancel.load(std::memory_order_relaxed)) {
         m_indexStore->Save();
-        EmitStatus(
-            IndexerState::WatchingForChanges,
-            L"Done - " + std::to_wstring(m_indexStore->GetEntryCount()) + L" files indexed.");
+        EmitStatusDone(m_indexStore->GetEntryCount(), paths);
         StartWatchersForRoots(paths);
     }
     SetEvent(m_completionEvent);
@@ -123,15 +122,15 @@ void Indexer::RemovePaths(std::vector<std::wstring> paths) {
     m_cancel.store(false);
     ResetEvent(m_completionEvent);
 
-    struct Params {
+    struct RemoveParams {
         Indexer* self;
         std::vector<std::wstring> paths;
     };
-    auto* p = new Params{this, std::move(paths)};
+    auto* p = new RemoveParams{this, std::move(paths)};
     m_thread = CreateThread(
         nullptr, 0,
         [](LPVOID param) -> DWORD {
-            auto* p = static_cast<Params*>(param);
+            auto* p = static_cast<RemoveParams*>(param);
             p->self->RemovePathsThread(p->paths);
             delete p;
             return 0;
@@ -144,8 +143,7 @@ void Indexer::RemovePathsThread(const std::vector<std::wstring>& paths) {
     for (const auto& root : paths) m_indexStore->RemoveEntriesUnderPath(root);
     StopWatchersForRoots(paths);
     m_indexStore->Save();
-    EmitStatus(IndexerState::WatchingForChanges,
-               L"Done - " + std::to_wstring(m_indexStore->GetEntryCount()) + L" files indexed.");
+    EmitStatusDone(m_indexStore->GetEntryCount(), m_settings->GetSelectedDrives());
     SetEvent(m_completionEvent);
 }
 
@@ -185,7 +183,23 @@ bool Indexer::IsIndexing() const {
 void Indexer::EmitStatus(IndexerState state, std::wstring message, uint64_t filesIndexed,
                          uint32_t skipped) {
     if (m_statusCallback) {
-        IndexerStatus s{state, std::move(message), filesIndexed, skipped};
+        IndexerStatus s;
+        s.state = state;
+        s.message = std::move(message);
+        s.filesIndexed = filesIndexed;
+        s.skippedPaths = skipped;
+        m_statusCallback(s);
+    }
+}
+
+void Indexer::EmitStatusDone(uint64_t filesIndexed, std::vector<std::wstring> locations,
+                             uint64_t ageSeconds) {
+    if (m_statusCallback) {
+        IndexerStatus s;
+        s.state = IndexerState::WatchingForChanges;
+        s.filesIndexed = filesIndexed;
+        s.locations = std::move(locations);
+        s.indexAgeSeconds = ageSeconds;
         m_statusCallback(s);
     }
 }
@@ -211,12 +225,7 @@ void Indexer::IndexingThread() {
     if (!m_cancel.load(std::memory_order_relaxed)) {
         m_indexStore->EndWrite();
         m_indexStore->Save();
-        EmitStatus(
-            IndexerState::WatchingForChanges,
-            L"Index built - " + std::to_wstring(m_filesIndexed) + L" files" +
-                (m_skippedPaths > 0 ? L", " + std::to_wstring(m_skippedPaths) + L" paths skipped"
-                                    : L"") +
-                L".");
+        EmitStatusDone(m_filesIndexed, m_settings->GetSelectedDrives());
     }
 
     if (!m_cancel.load(std::memory_order_relaxed))

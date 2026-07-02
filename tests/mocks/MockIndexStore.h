@@ -21,6 +21,7 @@ public:
     MOCK_METHOD(const FileEntry*, GetEntries, (), (const, override));
     MOCK_METHOD(uint64_t, GetSavedUsn, (const std::wstring& root), (const, override));
     MOCK_METHOD(void, SetSavedUsn, (const std::wstring& root, uint64_t usn), (override));
+    MOCK_METHOD(uint64_t, GetIndexAgeSeconds, (), (const, override));
 };
 
 }  // namespace winindex

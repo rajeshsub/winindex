@@ -2,6 +2,7 @@
 
 #include <commctrl.h>
 #include <dbt.h>
+#include <ole2.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shlwapi.h>
@@ -18,8 +19,121 @@
 #include <iterator>
 
 #pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "shlwapi.lib")
+
+namespace {
+
+class DropSource : public IDropSource {
+public:
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++m_refs; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG r = --m_refs;
+        if (r == 0)
+            delete this;
+        return r;
+    }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (riid == IID_IUnknown || riid == IID_IDropSource) {
+            *ppv = this;
+            AddRef();
+            return S_OK;
+        }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+    HRESULT STDMETHODCALLTYPE QueryContinueDrag(BOOL fEscapePressed, DWORD grfKeyState) override {
+        if (fEscapePressed)
+            return DRAGDROP_S_CANCEL;
+        if (!(grfKeyState & (MK_LBUTTON | MK_RBUTTON)))
+            return DRAGDROP_S_DROP;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GiveFeedback(DWORD) override { return DRAGDROP_S_USEDEFAULTCURSORS; }
+
+private:
+    ULONG m_refs = 1;
+};
+
+class DropDataObject : public IDataObject {
+public:
+    explicit DropDataObject(HGLOBAL hDrop) : m_hDrop(hDrop) {}
+    ~DropDataObject() {
+        if (m_hDrop)
+            GlobalFree(m_hDrop);
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++m_refs; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG r = --m_refs;
+        if (r == 0)
+            delete this;
+        return r;
+    }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (riid == IID_IUnknown || riid == IID_IDataObject) {
+            *ppv = this;
+            AddRef();
+            return S_OK;
+        }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetData(FORMATETC* pfe, STGMEDIUM* pstg) override {
+        if (!pfe || !pstg)
+            return E_INVALIDARG;
+        if (pfe->cfFormat != CF_HDROP || !(pfe->tymed & TYMED_HGLOBAL))
+            return DV_E_FORMATETC;
+        SIZE_T sz = GlobalSize(m_hDrop);
+        HGLOBAL hCopy = GlobalAlloc(GMEM_MOVEABLE, sz);
+        if (!hCopy)
+            return E_OUTOFMEMORY;
+        void* dst = GlobalLock(hCopy);
+        const void* src = GlobalLock(m_hDrop);
+        memcpy(dst, src, sz);
+        GlobalUnlock(m_hDrop);
+        GlobalUnlock(hCopy);
+        pstg->tymed = TYMED_HGLOBAL;
+        pstg->hGlobal = hCopy;
+        pstg->pUnkForRelease = nullptr;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC* pfe) override {
+        if (!pfe)
+            return E_INVALIDARG;
+        if (pfe->cfFormat == CF_HDROP && (pfe->tymed & TYMED_HGLOBAL))
+            return S_OK;
+        return DV_E_FORMATETC;
+    }
+    HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD dir, IEnumFORMATETC** pp) override {
+        if (dir != DATADIR_GET)
+            return E_NOTIMPL;
+        FORMATETC fmt{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+        return SHCreateStdEnumFmtEtc(1, &fmt, pp);
+    }
+    HRESULT STDMETHODCALLTYPE GetDataHere(FORMATETC*, STGMEDIUM*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetCanonicalFormatEtc(FORMATETC*, FORMATETC* out) override {
+        if (out)
+            out->ptd = nullptr;
+        return E_NOTIMPL;
+    }
+    HRESULT STDMETHODCALLTYPE SetData(FORMATETC*, STGMEDIUM*, BOOL) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE DAdvise(FORMATETC*, DWORD, IAdviseSink*, DWORD*) override {
+        return OLE_E_ADVISENOTSUPPORTED;
+    }
+    HRESULT STDMETHODCALLTYPE DUnadvise(DWORD) override { return OLE_E_ADVISENOTSUPPORTED; }
+    HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA**) override {
+        return OLE_E_ADVISENOTSUPPORTED;
+    }
+
+private:
+    HGLOBAL m_hDrop;
+    ULONG m_refs = 1;
+};
+
+}  // namespace
 
 namespace winindex {
 
@@ -354,7 +468,8 @@ void MainWindow::OnSearchResults(std::vector<SearchResult>* results) {
 }
 
 void MainWindow::OnIndexerStatus(const IndexerStatus& status) {
-    Logger::Instance().Log(status.message);
+    if (!status.message.empty())
+        Logger::Instance().Log(status.message);
 
     bool hasIndex =
         (status.state == IndexerState::WatchingForChanges || status.state == IndexerState::Idle);
@@ -363,7 +478,16 @@ void MainWindow::OnIndexerStatus(const IndexerStatus& status) {
         SetFocus(m_hSearchBar);
     if (!hasIndex)
         ListView_SetItemCount(m_hListView, 0);
-    SetStatusText(status.message);
+
+    if (status.state == IndexerState::WatchingForChanges && !status.locations.empty()) {
+        std::wstring text = FormatFileCount(status.filesIndexed) + L" files | " +
+                            FormatLocationList(status.locations);
+        if (status.indexAgeSeconds != UINT64_MAX)
+            text += L" | " + FormatAge(status.indexAgeSeconds);
+        SetStatusText(text);
+    } else {
+        SetStatusText(status.message);
+    }
 }
 
 void MainWindow::OnListDblClick() {
@@ -528,6 +652,37 @@ void MainWindow::CutSelectedFiles() {
     }
 }
 
+void MainWindow::OnBeginDrag() {
+    std::wstring paths;
+    int i = -1;
+    while ((i = ListView_GetNextItem(m_hListView, i, LVNI_SELECTED)) != -1) {
+        if (i >= static_cast<int>(m_currentResults.size()))
+            break;
+        paths += m_currentResults[i].entry->path + L'\0';
+    }
+    if (paths.empty())
+        return;
+    paths += L'\0';
+
+    size_t dropSize = sizeof(DROPFILES) + paths.size() * sizeof(wchar_t);
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, dropSize);
+    if (!hMem)
+        return;
+
+    auto* df = static_cast<DROPFILES*>(GlobalLock(hMem));
+    df->pFiles = sizeof(DROPFILES);
+    df->fWide = TRUE;
+    memcpy(df + 1, paths.c_str(), paths.size() * sizeof(wchar_t));
+    GlobalUnlock(hMem);
+
+    auto* src = new DropSource();
+    auto* obj = new DropDataObject(hMem);
+    DWORD effect = 0;
+    DoDragDrop(obj, src, DROPEFFECT_COPY | DROPEFFECT_MOVE, &effect);
+    obj->Release();
+    src->Release();
+}
+
 void MainWindow::DeleteSelectedFiles() {
     int selCount = ListView_GetSelectedCount(m_hListView);
     if (selCount == 0)
@@ -669,7 +824,7 @@ void MainWindow::OnDeviceChange(WPARAM event, LPARAM lp) {
 
 LRESULT CALLBACK MainWindow::SearchBarSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
                                                    UINT_PTR /*uIdSubclass*/, DWORD_PTR dwRefData) {
-    if (msg == WM_KEYDOWN && wp == VK_DOWN) {
+    if (msg == WM_KEYDOWN && (wp == VK_DOWN || wp == VK_UP)) {
         MainWindow* mw = reinterpret_cast<MainWindow*>(dwRefData);
         if (mw && mw->m_hListView && ListView_GetItemCount(mw->m_hListView) > 0) {
             SetFocus(mw->m_hListView);
@@ -729,6 +884,9 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                 switch (hdr->code) {
                     case NM_DBLCLK:
                         self->OnListDblClick();
+                        break;
+                    case LVN_BEGINDRAG:
+                        self->OnBeginDrag();
                         break;
                     case LVN_COLUMNCLICK:
                         self->OnColumnClick(reinterpret_cast<const NMLISTVIEW*>(lp)->iSubItem);

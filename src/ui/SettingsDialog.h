@@ -20,8 +20,7 @@ private:
     static INT_PTR CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     void OnInit(HWND hwnd);
     void OnOk(HWND hwnd);
-    static void OnAddDrive(HWND hwnd);
-    static void OnAddFolder(HWND hwnd);
+    static void OnAddLocation(HWND hwnd);
     static void OnRemovePath(HWND hwnd);
     static void OnAddExclusion(HWND hwnd);
     static void OnRemoveExclusion(HWND hwnd);

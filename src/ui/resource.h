@@ -46,8 +46,7 @@
 
 // Settings dialog (paths-to-index section)
 #define IDC_PATH_LIST 3010
-#define IDC_PATH_ADD_DRIVE 3011
-#define IDC_PATH_ADD_FOLDER 3012
+#define IDC_PATH_ADD_LOCATION 3011
 #define IDC_PATH_REMOVE 3013
 
 // WM_APP messages (cross-thread UI updates)

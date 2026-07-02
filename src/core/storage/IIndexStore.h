@@ -67,6 +67,10 @@ public:
     /// @param root Drive root, e.g. L"C:\\".
     /// @param usn  New USN cursor value returned by IUsnJournalMonitor::ReplaySince.
     virtual void SetSavedUsn(const std::wstring& root, uint64_t usn) = 0;
+
+    /// @brief Returns the age of the on-disk index file in seconds.
+    /// Returns UINT64_MAX if the file does not exist.
+    virtual uint64_t GetIndexAgeSeconds() const = 0;
 };
 
 }  // namespace winindex

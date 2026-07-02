@@ -32,3 +32,13 @@ repos:
           - '--enable=warning,style,performance'
           - '--error-exitcode=1'
           - '--quiet'
+
+  - repo: local
+    hooks:
+      - id: cmake-tests
+        name: Run unit tests (pre-push)
+        language: system
+        entry: scripts/run-tests.bat
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
