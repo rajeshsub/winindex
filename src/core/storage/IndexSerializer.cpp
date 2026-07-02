@@ -5,12 +5,23 @@
 #include <algorithm>
 #include <cstring>
 #include <fstream>
-#include <unordered_map>
-#include <vector>
 
 namespace winindex {
 
-// CRC-32 (ISO 3309 polynomial)
+static constexpr uint32_t kMagic = 0x58444957u;  // "WIDX"
+static constexpr uint16_t kVersion = 2;
+
+// Per-entry record as stored on disk (24 bytes, naturally aligned).
+#pragma pack(push, 1)
+struct DiskEntry {
+    uint64_t size;
+    uint64_t lastModified;
+    uint32_t attributes;
+    uint16_t pathLen;
+    uint16_t nameStart;
+};
+#pragma pack(pop)
+
 uint32_t IndexSerializer::Crc32(const void* data, size_t len) {
     static uint32_t table[256] = {};
     static bool initialized = false;
@@ -28,44 +39,51 @@ uint32_t IndexSerializer::Crc32(const void* data, size_t len) {
     return crc ^ 0xFFFFFFFFu;
 }
 
-bool IndexSerializer::Serialize(const std::wstring& filePath, const std::vector<FileEntry>& entries,
+bool IndexSerializer::Serialize(const std::wstring& filePath, const IndexPool& pool,
                                 const std::unordered_map<std::wstring, uint64_t>& usnMap) {
-    // Build payload (everything after header) in memory first so we can CRC it
+    // Build payload in memory so we can CRC it before writing.
     std::vector<uint8_t> payload;
-    payload.reserve(entries.size() * 128);
 
-    auto writeU16 = [&](uint16_t v) {
-        payload.insert(payload.end(), reinterpret_cast<uint8_t*>(&v),
-                       reinterpret_cast<uint8_t*>(&v) + sizeof(v));
+    auto writeRaw = [&](const void* src, size_t bytes) {
+        const auto* b = static_cast<const uint8_t*>(src);
+        payload.insert(payload.end(), b, b + bytes);
     };
-    auto writeU32 = [&](uint32_t v) {
-        payload.insert(payload.end(), reinterpret_cast<uint8_t*>(&v),
-                       reinterpret_cast<uint8_t*>(&v) + sizeof(v));
-    };
-    auto writeU64 = [&](uint64_t v) {
-        payload.insert(payload.end(), reinterpret_cast<uint8_t*>(&v),
-                       reinterpret_cast<uint8_t*>(&v) + sizeof(v));
-    };
-    auto writeWStr = [&](const std::wstring& s) {
-        const uint8_t* b = reinterpret_cast<const uint8_t*>(s.data());
-        payload.insert(payload.end(), b, b + s.size() * sizeof(wchar_t));
-    };
+    auto writeU16 = [&](uint16_t v) { writeRaw(&v, sizeof(v)); };
+    auto writeU32 = [&](uint32_t v) { writeRaw(&v, sizeof(v)); };
+    auto writeU64 = [&](uint64_t v) { writeRaw(&v, sizeof(v)); };
 
-    for (const auto& e : entries) {
-        writeU16(static_cast<uint16_t>(e.name.size()));
-        writeU16(static_cast<uint16_t>(e.path.size()));
-        writeU64(e.size);
-        writeU64(e.lastModified);
-        writeU32(e.attributes);
-        writeWStr(e.name);
-        writeWStr(e.path);
+    // Path pool
+    uint64_t pathPoolSize = pool.pathPool.size();
+    writeU64(pathPoolSize);
+    if (pathPoolSize > 0)
+        writeRaw(pool.pathPool.data(), pathPoolSize * sizeof(wchar_t));
+
+    // Per-entry disk records (only non-deleted entries)
+    // We'll need to recount, so build in two passes: count first, then fill.
+    // Actually we write all (deleted bit is not persisted; deleted entries are dropped on Save).
+    uint64_t liveCount = 0;
+    for (size_t i = 0; i < pool.meta.size(); ++i)
+        if (!pool.meta[i].deleted)
+            ++liveCount;
+
+    for (size_t i = 0; i < pool.meta.size(); ++i) {
+        const EntryMeta& m = pool.meta[i];
+        if (m.deleted)
+            continue;
+        DiskEntry de{};
+        de.size = m.size;
+        de.lastModified = m.lastModified;
+        de.attributes = m.attributes;
+        de.pathLen = m.pathLen;
+        de.nameStart = m.nameStart;
+        writeRaw(&de, sizeof(de));
     }
 
     // USN map
     writeU32(static_cast<uint32_t>(usnMap.size()));
     for (const auto& [root, usn] : usnMap) {
         writeU16(static_cast<uint16_t>(root.size()));
-        writeWStr(root);
+        writeRaw(root.data(), root.size() * sizeof(wchar_t));
         writeU64(usn);
     }
 
@@ -74,10 +92,10 @@ bool IndexSerializer::Serialize(const std::wstring& filePath, const std::vector<
     uint64_t ts = (static_cast<uint64_t>(now.dwHighDateTime) << 32) | now.dwLowDateTime;
 
     IndexFileHeader hdr{};
-    hdr.magic = 0x58444957u;
-    hdr.version = 1;
+    hdr.magic = kMagic;
+    hdr.version = kVersion;
     hdr.timestamp = ts;
-    hdr.entryCount = static_cast<uint64_t>(entries.size());
+    hdr.entryCount = liveCount;
     hdr.crc32 = Crc32(payload.data(), payload.size());
 
     std::ofstream f(filePath, std::ios::binary | std::ios::trunc);
@@ -89,7 +107,7 @@ bool IndexSerializer::Serialize(const std::wstring& filePath, const std::vector<
     return f.good();
 }
 
-bool IndexSerializer::Deserialize(const std::wstring& filePath, std::vector<FileEntry>& entries,
+bool IndexSerializer::Deserialize(const std::wstring& filePath, IndexPool& pool,
                                   std::unordered_map<std::wstring, uint64_t>& usnMap,
                                   uint64_t& outTimestamp) {
     std::ifstream f(filePath, std::ios::binary | std::ios::ate);
@@ -104,10 +122,10 @@ bool IndexSerializer::Deserialize(const std::wstring& filePath, std::vector<File
     IndexFileHeader hdr{};
     f.read(reinterpret_cast<char*>(&hdr), sizeof(hdr));
 
-    if (hdr.magic != 0x58444957u)
+    if (hdr.magic != kMagic)
         return false;
-    if (hdr.version != 1)
-        return false;
+    if (hdr.version != kVersion)
+        return false;  // Version 1 file: caller triggers re-index
 
     size_t payloadSize = fileSize - sizeof(IndexFileHeader);
     std::vector<uint8_t> payload(payloadSize);
@@ -119,7 +137,7 @@ bool IndexSerializer::Deserialize(const std::wstring& filePath, std::vector<File
         return false;
 
     outTimestamp = hdr.timestamp;
-    entries.resize(static_cast<size_t>(hdr.entryCount));
+    pool.Clear();
 
     const uint8_t* p = payload.data();
     const uint8_t* end = payload.data() + payloadSize;
@@ -142,27 +160,79 @@ bool IndexSerializer::Deserialize(const std::wstring& filePath, std::vector<File
         p += sizeof(v);
         return v;
     };
-    auto readWStr = [&](size_t chars) -> std::wstring {
-        std::wstring s(chars, L'\0');
-        memcpy(s.data(), p, chars * sizeof(wchar_t));
-        p += chars * sizeof(wchar_t);
-        return s;
-    };
 
-    for (auto& e : entries) {
-        if (p + 4 > end)
-            return false;
-        uint16_t nameLen = readU16();
-        uint16_t pathLen = readU16();
-        e.size = readU64();
-        e.lastModified = readU64();
-        e.attributes = readU32();
-        e.name = readWStr(nameLen);
-        e.nameLower = e.name;
-        std::transform(e.nameLower.begin(), e.nameLower.end(), e.nameLower.begin(), ::towlower);
-        e.path = readWStr(pathLen);
+    // Path pool
+    if (p + sizeof(uint64_t) > end)
+        return false;
+    uint64_t pathPoolSize = readU64();
+    size_t pathPoolBytes = static_cast<size_t>(pathPoolSize) * sizeof(wchar_t);
+    if (p + pathPoolBytes > end)
+        return false;
+
+    pool.pathPool.resize(static_cast<size_t>(pathPoolSize));
+    if (pathPoolSize > 0)
+        memcpy(pool.pathPool.data(), p, pathPoolBytes);
+    p += pathPoolBytes;
+
+    // Per-entry records: reconstruct metadata + nameLower pool
+    uint64_t entryCount = hdr.entryCount;
+    pool.meta.reserve(static_cast<size_t>(entryCount));
+    pool.nameLowerPool.reserve(static_cast<size_t>(entryCount) * 15);
+
+    size_t diskEntrySize = sizeof(DiskEntry);
+    if (p + diskEntrySize * entryCount > end)
+        return false;
+
+    for (uint64_t i = 0; i < entryCount; ++i) {
+        DiskEntry de{};
+        memcpy(&de, p, diskEntrySize);
+        p += diskEntrySize;
+
+        EntryMeta m{};
+        m.size = de.size;
+        m.lastModified = de.lastModified;
+        m.attributes = de.attributes;
+        m.pathLen = de.pathLen;
+        m.nameStart = de.nameStart;
+        m.deleted = 0;
+
+        // pathOffset: we need to figure out where this entry's path sits in the pool.
+        // Since we read pathPool as a whole flat buffer and DiskEntry doesn't store pathOffset
+        // (we need to recompute it), we track the running offset using pathLen values.
+        // This is done below after the loop.
+        // For now, store a sentinel — we'll fix it up.
+        m.pathOffset = 0;  // fixed up below
+
+        // Build nameLower from the path tail
+        m.nameLowerOffset = static_cast<uint32_t>(pool.nameLowerPool.size());
+        uint16_t nameLen = static_cast<uint16_t>(de.pathLen - de.nameStart);
+        m.nameLowerLen = nameLen;
+        // pathOffset not yet known; use running sum from previous entries
+        // We'll fix pathOffset in a second pass below.
+        pool.meta.push_back(m);
+        pool.nameLowerPool.resize(pool.nameLowerPool.size() + nameLen);
     }
 
+    // Second pass: assign pathOffsets and fill nameLowerPool.
+    uint32_t runningPathOffset = 0;
+    size_t runningNlOffset = 0;
+    for (uint64_t i = 0; i < entryCount; ++i) {
+        EntryMeta& m = pool.meta[i];
+        m.pathOffset = runningPathOffset;
+        m.nameLowerOffset = static_cast<uint32_t>(runningNlOffset);
+
+        // Fill nameLower: lowercase the filename portion of path
+        const wchar_t* nameSrc = pool.pathPool.data() + runningPathOffset + m.nameStart;
+        wchar_t* nlDst = pool.nameLowerPool.data() + runningNlOffset;
+        uint16_t nameLen = m.nameLowerLen;
+        for (uint16_t c = 0; c < nameLen; ++c)
+            nlDst[c] = static_cast<wchar_t>(::towlower(nameSrc[c]));
+
+        runningPathOffset += m.pathLen;
+        runningNlOffset += nameLen;
+    }
+
+    // USN map
     if (p + sizeof(uint32_t) <= end) {
         uint32_t usnCount = readU32();
         for (uint32_t i = 0; i < usnCount; ++i) {
@@ -171,7 +241,8 @@ bool IndexSerializer::Deserialize(const std::wstring& filePath, std::vector<File
             uint16_t rootLen = readU16();
             if (p + rootLen * sizeof(wchar_t) + sizeof(uint64_t) > end)
                 break;
-            std::wstring root = readWStr(rootLen);
+            std::wstring root(reinterpret_cast<const wchar_t*>(p), rootLen);
+            p += rootLen * sizeof(wchar_t);
             uint64_t usn = readU64();
             usnMap[root] = usn;
         }

@@ -434,22 +434,46 @@ void MainWindow::ExecuteSearch(const std::wstring& query) {
         m_searchThread.join();
     m_searchCancel.store(false);
 
-    auto* results = new std::vector<SearchResult>();
-    auto entries = m_indexStore->GetEntries();
-    auto count = m_indexStore->GetEntryCount();
+    // Acquire shared lock so pool pointers remain stable for the search thread.
+    std::shared_lock<std::shared_mutex> lock(m_indexStore->GetSearchMutex());
+    const IndexPool& pool = m_indexStore->GetPool();
+    const EntryMeta* meta = pool.meta.data();
+    uint64_t entryCount = static_cast<uint64_t>(pool.meta.size());
+    const wchar_t* nlPool = pool.nameLowerPool.data();
+    const wchar_t* pathPool = pool.pathPool.data();
+
     auto opts = m_settings->GetSearchOptions();
     auto engine = m_searchEngine;
     auto& cancelRef = m_searchCancel;
     HWND hwnd = m_hwnd;
 
-    m_searchThread = std::thread([=, &cancelRef]() mutable {
-        *results = engine->Search(query, entries, count, opts, 10000, cancelRef);
-        PostMessageW(hwnd, WM_SEARCH_RESULTS, 0, reinterpret_cast<LPARAM>(results));
+    // Move lock into thread — prevents exclusive writes (EndWrite/ApplyAdd) until search completes.
+    m_searchThread = std::thread([=, lk = std::move(lock), &cancelRef]() mutable {
+        auto raw =
+            engine->Search(query, meta, entryCount, nlPool, pathPool, opts, 10000, cancelRef);
+
+        auto* display = new std::vector<DisplayEntry>();
+        display->reserve(raw.size());
+        for (const auto& r : raw) {
+            const EntryMeta& m = meta[r.entryIndex];
+            uint16_t nameLen = static_cast<uint16_t>(m.pathLen - m.nameStart);
+            DisplayEntry de;
+            de.name = std::wstring(pathPool + m.pathOffset + m.nameStart, nameLen);
+            de.path = std::wstring(pathPool + m.pathOffset, m.pathLen);
+            de.size = m.size;
+            de.lastModified = m.lastModified;
+            de.attributes = m.attributes;
+            de.matchStart = r.matchStart;
+            de.matchLen = r.matchLen;
+            display->push_back(std::move(de));
+        }
+        // lk released here — exclusive writes may now proceed.
+        PostMessageW(hwnd, WM_SEARCH_RESULTS, 0, reinterpret_cast<LPARAM>(display));
     });
 }
 
-void MainWindow::OnSearchResults(std::vector<SearchResult>* results) {
-    m_totalMatches = results->size();  // simplified; actual total would need separate count pass
+void MainWindow::OnSearchResults(std::vector<DisplayEntry>* results) {
+    m_totalMatches = results->size();
     m_currentResults = std::move(*results);
     delete results;
 
@@ -494,10 +518,10 @@ void MainWindow::OnListDblClick() {
     int sel = ListView_GetNextItem(m_hListView, -1, LVNI_SELECTED);
     if (sel < 0 || sel >= static_cast<int>(m_currentResults.size()))
         return;
-    const FileEntry* entry = m_currentResults[sel].entry;
-    if (!PreCheckFileExists(entry))
+    const std::wstring& path = m_currentResults[sel].path;
+    if (!PreCheckFileExists(path))
         return;
-    ShellExecuteW(m_hwnd, L"open", entry->path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    ShellExecuteW(m_hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
 void MainWindow::OnListKeyDown(const NMLVKEYDOWN* kd) {
@@ -547,12 +571,12 @@ void MainWindow::OnContextMenu(HWND hwndFrom, int x, int y) {
     DestroyMenu(hBase);
 }
 
-bool MainWindow::PreCheckFileExists(const FileEntry* entry) {
-    if (GetFileAttributesW(entry->path.c_str()) != INVALID_FILE_ATTRIBUTES)
+bool MainWindow::PreCheckFileExists(const std::wstring& path) {
+    if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES)
         return true;
 
     std::wstring msg =
-        L"The file no longer exists:\n\n" + entry->path +
+        L"The file no longer exists:\n\n" + path +
         L"\n\nThe index may be out of date. Would you like to rebuild the index now?";
     int ret = MessageBoxW(m_hwnd, msg.c_str(), L"File Not Found", MB_YESNO | MB_ICONWARNING);
     if (ret == IDYES)
@@ -564,20 +588,19 @@ void MainWindow::OpenSelectedFile() {
     int sel = ListView_GetNextItem(m_hListView, -1, LVNI_SELECTED);
     if (sel < 0 || sel >= static_cast<int>(m_currentResults.size()))
         return;
-    const FileEntry* entry = m_currentResults[sel].entry;
-    if (!PreCheckFileExists(entry))
+    const std::wstring& path = m_currentResults[sel].path;
+    if (!PreCheckFileExists(path))
         return;
-    ShellExecuteW(m_hwnd, L"open", entry->path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    ShellExecuteW(m_hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
 void MainWindow::OpenContainingFolder() {
     int sel = ListView_GetNextItem(m_hListView, -1, LVNI_SELECTED);
     if (sel < 0 || sel >= static_cast<int>(m_currentResults.size()))
         return;
-    const FileEntry* entry = m_currentResults[sel].entry;
+    const std::wstring& path = m_currentResults[sel].path;
 
-    // Open Explorer with file selected
-    PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(entry->path.c_str());
+    PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(path.c_str());
     if (pidl) {
         SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0);
         ILFree(pidl);
@@ -590,8 +613,8 @@ void MainWindow::CopySelectedPaths(bool filenameOnly) {
     while ((i = ListView_GetNextItem(m_hListView, i, LVNI_SELECTED)) != -1) {
         if (i >= static_cast<int>(m_currentResults.size()))
             break;
-        const FileEntry* e = m_currentResults[i].entry;
-        text += (filenameOnly ? e->name : e->path) + L"\r\n";
+        const DisplayEntry& e = m_currentResults[i];
+        text += (filenameOnly ? e.name : e.path) + L"\r\n";
     }
     if (text.empty())
         return;
@@ -617,7 +640,7 @@ void MainWindow::CutSelectedFiles() {
     while ((i = ListView_GetNextItem(m_hListView, i, LVNI_SELECTED)) != -1) {
         if (i >= static_cast<int>(m_currentResults.size()))
             break;
-        paths += m_currentResults[i].entry->path + L'\0';
+        paths += m_currentResults[i].path + L'\0';
     }
     if (paths.empty())
         return;
@@ -658,7 +681,7 @@ void MainWindow::OnBeginDrag() {
     while ((i = ListView_GetNextItem(m_hListView, i, LVNI_SELECTED)) != -1) {
         if (i >= static_cast<int>(m_currentResults.size()))
             break;
-        paths += m_currentResults[i].entry->path + L'\0';
+        paths += m_currentResults[i].path + L'\0';
     }
     if (paths.empty())
         return;
@@ -693,13 +716,12 @@ void MainWindow::DeleteSelectedFiles() {
     if (MessageBoxW(m_hwnd, msg.c_str(), L"Confirm Delete", MB_YESNO | MB_ICONWARNING) != IDYES)
         return;
 
-    // Build double-null-terminated path list for SHFileOperation
     std::wstring paths;
     int i = -1;
     while ((i = ListView_GetNextItem(m_hListView, i, LVNI_SELECTED)) != -1) {
         if (i >= static_cast<int>(m_currentResults.size()))
             break;
-        paths += m_currentResults[i].entry->path + L'\0';
+        paths += m_currentResults[i].path + L'\0';
     }
     if (paths.empty())
         return;
@@ -740,24 +762,22 @@ void MainWindow::ApplyCurrentSort() {
     int col = m_sortColumn;
     bool desc = m_sortDescending;
     std::sort(m_currentResults.begin(), m_currentResults.end(),
-              [col, desc](const SearchResult& a, const SearchResult& b) {
+              [col, desc](const DisplayEntry& a, const DisplayEntry& b) {
                   int cmp = 0;
                   switch (col) {
                       case 0:
-                          cmp = a.entry->name.compare(b.entry->name);
+                          cmp = a.name.compare(b.name);
                           break;
                       case 1:
-                          cmp = a.entry->path.compare(b.entry->path);
+                          cmp = a.path.compare(b.path);
                           break;
                       case 2:
-                          cmp = (a.entry->size < b.entry->size)   ? -1
-                                : (a.entry->size > b.entry->size) ? 1
-                                                                  : 0;
+                          cmp = (a.size < b.size) ? -1 : (a.size > b.size) ? 1 : 0;
                           break;
                       case 3:
-                          cmp = (a.entry->lastModified < b.entry->lastModified)   ? -1
-                                : (a.entry->lastModified > b.entry->lastModified) ? 1
-                                                                                  : 0;
+                          cmp = (a.lastModified < b.lastModified)   ? -1
+                                : (a.lastModified > b.lastModified) ? 1
+                                                                    : 0;
                           break;
                       default:
                           break;
@@ -899,34 +919,33 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                         int idx = di->item.iItem;
                         if (idx < 0 || idx >= static_cast<int>(self->m_currentResults.size()))
                             break;
-                        const FileEntry* e = self->m_currentResults[idx].entry;
+                        const DisplayEntry& e = self->m_currentResults[idx];
                         if (di->item.mask & LVIF_TEXT) {
                             switch (di->item.iSubItem) {
                                 case 0:
-                                    di->item.pszText = const_cast<LPWSTR>(e->name.c_str());
+                                    di->item.pszText = const_cast<LPWSTR>(e.name.c_str());
                                     break;
                                 case 1: {
-                                    // Show path without filename
                                     static thread_local std::wstring pathBuf;
-                                    size_t slash = e->path.rfind(L'\\');
+                                    size_t slash = e.path.rfind(L'\\');
                                     pathBuf = (slash != std::wstring::npos)
-                                                  ? e->path.substr(0, slash)
-                                                  : e->path;
+                                                  ? e.path.substr(0, slash)
+                                                  : e.path;
                                     di->item.pszText = const_cast<LPWSTR>(pathBuf.c_str());
                                     break;
                                 }
                                 case 2: {
                                     static thread_local std::wstring sizeBuf;
                                     wchar_t szBuf[32]{};
-                                    if (e->size < 1024ULL)
-                                        swprintf_s(szBuf, L"%llu B", e->size);
-                                    else if (e->size < 1024ULL * 1024)
-                                        swprintf_s(szBuf, L"%.2f KB", e->size / 1024.0);
-                                    else if (e->size < 1024ULL * 1024 * 1024)
-                                        swprintf_s(szBuf, L"%.2f MB", e->size / (1024.0 * 1024));
+                                    if (e.size < 1024ULL)
+                                        swprintf_s(szBuf, L"%llu B", e.size);
+                                    else if (e.size < 1024ULL * 1024)
+                                        swprintf_s(szBuf, L"%.2f KB", e.size / 1024.0);
+                                    else if (e.size < 1024ULL * 1024 * 1024)
+                                        swprintf_s(szBuf, L"%.2f MB", e.size / (1024.0 * 1024));
                                     else
                                         swprintf_s(szBuf, L"%.2f GB",
-                                                   e->size / (1024.0 * 1024 * 1024));
+                                                   e.size / (1024.0 * 1024 * 1024));
                                     sizeBuf = szBuf;
                                     di->item.pszText = const_cast<LPWSTR>(sizeBuf.c_str());
                                     break;
@@ -934,8 +953,8 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                                 case 3: {
                                     static thread_local std::wstring dateBuf;
                                     FILETIME ft;
-                                    ft.dwLowDateTime = static_cast<DWORD>(e->lastModified);
-                                    ft.dwHighDateTime = static_cast<DWORD>(e->lastModified >> 32);
+                                    ft.dwLowDateTime = static_cast<DWORD>(e.lastModified);
+                                    ft.dwHighDateTime = static_cast<DWORD>(e.lastModified >> 32);
                                     SYSTEMTIME st{};
                                     FileTimeToLocalFileTime(&ft, &ft);
                                     FileTimeToSystemTime(&ft, &st);
@@ -969,7 +988,7 @@ LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
         }
 
         case WM_SEARCH_RESULTS: {
-            auto* r = reinterpret_cast<std::vector<SearchResult>*>(lp);
+            auto* r = reinterpret_cast<std::vector<DisplayEntry>*>(lp);
             if (self && r)
                 self->OnSearchResults(r);
             return 0;
