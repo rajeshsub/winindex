@@ -21,10 +21,9 @@ bool IndexStore::IsIndexValid() const {
     if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &fad))
         return false;
 
-    // Check age against configured reindex interval
     uint64_t reindexIntervalHours = m_settings->GetReindexIntervalHours();
     if (reindexIntervalHours == 0)
-        return true;  // Manual only — always treat as valid
+        return true;
 
     FILETIME now{};
     GetSystemTimeAsFileTime(&now);
@@ -32,58 +31,104 @@ bool IndexStore::IsIndexValid() const {
     uint64_t fileVal = (static_cast<uint64_t>(fad.ftLastWriteTime.dwHighDateTime) << 32) |
                        fad.ftLastWriteTime.dwLowDateTime;
 
-    // FILETIME is in 100-nanosecond intervals
     constexpr uint64_t hundredNsPerHour = 36000000000ULL;
     uint64_t ageHours = (nowVal - fileVal) / hundredNsPerHour;
     return ageHours < reindexIntervalHours;
 }
 
 void IndexStore::Load() {
-    std::lock_guard lock(m_mutex);
-    m_entries.clear();
-    m_usnMap.clear();
+    IndexPool tmp;
+    std::unordered_map<std::wstring, uint64_t> usnTmp;
     uint64_t ts = 0;
-    if (!IndexSerializer::Deserialize(IndexFilePath(), m_entries, m_usnMap, ts)) {
-        m_entries.clear();
+    bool ok = IndexSerializer::Deserialize(IndexFilePath(), tmp, usnTmp, ts);
+
+    std::unique_lock lock(m_mutex);
+    if (ok) {
+        m_pool = std::move(tmp);
+        m_usnMap = std::move(usnTmp);
+    } else {
+        m_pool.Clear();
         m_usnMap.clear();
     }
 }
 
 void IndexStore::Save() {
-    std::lock_guard lock(m_mutex);
-    IndexSerializer::Serialize(IndexFilePath(), m_entries, m_usnMap);
+    std::shared_lock lock(m_mutex);
+    IndexSerializer::Serialize(IndexFilePath(), m_pool, m_usnMap);
 }
 
 void IndexStore::BeginWrite() {
-    std::lock_guard lock(m_mutex);
-    m_entries.clear();
+    m_stagingBuf.clear();
 }
 
 void IndexStore::AddEntry(const FileEntry& e) {
-    std::lock_guard lock(m_mutex);
-    m_entries.push_back(e);
+    // Called from single indexing thread — no lock needed on staging buffer.
+    m_stagingBuf.push_back(e);
 }
 
 void IndexStore::EndWrite() {
-    // Nothing to flush — entries are in memory until Save()
+    IndexPool fresh;
+    fresh.Reserve(m_stagingBuf.size());
+    for (const auto& e : m_stagingBuf) fresh.AddEntry(e);
+    m_stagingBuf.clear();
+
+    std::unique_lock lock(m_mutex);
+    m_pool = std::move(fresh);
 }
 
 void IndexStore::ApplyAdd(const FileEntry& entry) {
-    std::lock_guard lock(m_mutex);
-    m_entries.push_back(entry);
+    std::unique_lock lock(m_mutex);
+    m_pool.AddEntry(entry);
 }
 
 void IndexStore::ApplyRemove(const std::wstring& path) {
-    std::lock_guard lock(m_mutex);
     std::wstring lower = path;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
-    m_entries.erase(std::remove_if(m_entries.begin(), m_entries.end(),
-                                   [&](const FileEntry& e) {
-                                       std::wstring p = e.path;
-                                       std::transform(p.begin(), p.end(), p.begin(), ::towlower);
-                                       return p == lower;
-                                   }),
-                    m_entries.end());
+
+    std::unique_lock lock(m_mutex);
+    for (size_t i = 0; i < m_pool.meta.size(); ++i) {
+        if (m_pool.meta[i].deleted)
+            continue;
+        auto pv = m_pool.GetPath(static_cast<uint32_t>(i));
+        std::wstring pl(pv.begin(), pv.end());
+        std::transform(pl.begin(), pl.end(), pl.begin(), ::towlower);
+        if (pl == lower) {
+            m_pool.meta[i].deleted = 1;
+            break;
+        }
+    }
+}
+
+void IndexStore::ApplyRename(const std::wstring& oldPath, const std::wstring& newPath) {
+    std::wstring oldLower = oldPath;
+    std::transform(oldLower.begin(), oldLower.end(), oldLower.begin(), ::towlower);
+
+    std::unique_lock lock(m_mutex);
+    for (size_t i = 0; i < m_pool.meta.size(); ++i) {
+        if (m_pool.meta[i].deleted)
+            continue;
+        auto pv = m_pool.GetPath(static_cast<uint32_t>(i));
+        std::wstring pl(pv.begin(), pv.end());
+        std::transform(pl.begin(), pl.end(), pl.begin(), ::towlower);
+        if (pl == oldLower) {
+            m_pool.meta[i].deleted = 1;
+
+            // Construct FileEntry for the new path preserving metadata
+            const EntryMeta& om = m_pool.meta[i];
+            FileEntry fe;
+            fe.path = newPath;
+            size_t slash = newPath.rfind(L'\\');
+            fe.name = (slash != std::wstring::npos) ? newPath.substr(slash + 1) : newPath;
+            fe.nameLower = fe.name;
+            std::transform(fe.nameLower.begin(), fe.nameLower.end(), fe.nameLower.begin(),
+                           ::towlower);
+            fe.size = om.size;
+            fe.lastModified = om.lastModified;
+            fe.attributes = om.attributes;
+            m_pool.AddEntry(fe);
+            break;
+        }
+    }
 }
 
 void IndexStore::RemoveEntriesUnderPath(const std::wstring& prefix) {
@@ -92,51 +137,32 @@ void IndexStore::RemoveEntriesUnderPath(const std::wstring& prefix) {
     if (!lp.empty() && lp.back() != L'\\')
         lp += L'\\';
 
-    std::lock_guard lock(m_mutex);
-    m_entries.erase(std::remove_if(m_entries.begin(), m_entries.end(),
-                                   [&](const FileEntry& e) {
-                                       std::wstring ep = e.path;
-                                       std::transform(ep.begin(), ep.end(), ep.begin(), ::towlower);
-                                       return ep.compare(0, lp.size(), lp) == 0;
-                                   }),
-                    m_entries.end());
-}
-
-void IndexStore::ApplyRename(const std::wstring& oldPath, const std::wstring& newPath) {
-    std::lock_guard lock(m_mutex);
-    std::wstring oldLower = oldPath;
-    std::transform(oldLower.begin(), oldLower.end(), oldLower.begin(), ::towlower);
-    for (auto& e : m_entries) {
-        std::wstring p = e.path;
-        std::transform(p.begin(), p.end(), p.begin(), ::towlower);
-        if (p == oldLower) {
-            e.path = newPath;
-            size_t slash = newPath.rfind(L'\\');
-            e.name = (slash != std::wstring::npos) ? newPath.substr(slash + 1) : newPath;
-            e.nameLower = e.name;
-            std::transform(e.nameLower.begin(), e.nameLower.end(), e.nameLower.begin(), ::towlower);
-            break;
-        }
+    std::unique_lock lock(m_mutex);
+    for (size_t i = 0; i < m_pool.meta.size(); ++i) {
+        if (m_pool.meta[i].deleted)
+            continue;
+        auto pv = m_pool.GetPath(static_cast<uint32_t>(i));
+        std::wstring pl(pv.begin(), pv.end());
+        std::transform(pl.begin(), pl.end(), pl.begin(), ::towlower);
+        if (pl.compare(0, lp.size(), lp) == 0)
+            m_pool.meta[i].deleted = 1;
     }
 }
 
 uint64_t IndexStore::GetEntryCount() const {
-    std::lock_guard lock(m_mutex);
-    return m_entries.size();
-}
-
-const FileEntry* IndexStore::GetEntries() const {
-    return m_entries.data();
+    std::shared_lock lock(m_mutex);
+    return static_cast<uint64_t>(std::count_if(m_pool.meta.begin(), m_pool.meta.end(),
+                                               [](const EntryMeta& m) { return !m.deleted; }));
 }
 
 uint64_t IndexStore::GetSavedUsn(const std::wstring& root) const {
-    std::lock_guard lock(m_mutex);
+    std::shared_lock lock(m_mutex);
     auto it = m_usnMap.find(root);
     return (it != m_usnMap.end()) ? it->second : 0;
 }
 
 void IndexStore::SetSavedUsn(const std::wstring& root, uint64_t usn) {
-    std::lock_guard lock(m_mutex);
+    std::unique_lock lock(m_mutex);
     m_usnMap[root] = usn;
 }
 

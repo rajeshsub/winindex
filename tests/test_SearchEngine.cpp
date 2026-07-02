@@ -3,14 +3,14 @@
 #include "search/SearchEngine.h"
 #include "search/SimdSearch.h"
 #include "search/TokenMatcher.h"
+#include "storage/IndexPool.h"
 #include <atomic>
 #include <vector>
 
 using namespace winindex;
 
-static std::vector<FileEntry> MakeEntries(
-    std::initializer_list<std::pair<const wchar_t*, const wchar_t*>> items) {
-    std::vector<FileEntry> v;
+static IndexPool MakePool(std::initializer_list<std::pair<const wchar_t*, const wchar_t*>> items) {
+    IndexPool pool;
     for (auto& [name, path] : items) {
         FileEntry e;
         e.name = name;
@@ -20,9 +20,16 @@ static std::vector<FileEntry> MakeEntries(
         e.size = 0;
         e.lastModified = 0;
         e.attributes = 0;
-        v.push_back(e);
+        pool.AddEntry(e);
     }
-    return v;
+    return pool;
+}
+
+static std::vector<SearchResult> DoSearch(SearchEngine& engine, const IndexPool& pool,
+                                          const std::wstring& query, const SearchOptions& opts,
+                                          uint32_t maxResults, const std::atomic<bool>& cancel) {
+    return engine.Search(query, pool.meta.data(), static_cast<uint64_t>(pool.meta.size()),
+                         pool.nameLowerPool.data(), pool.pathPool.data(), opts, maxResults, cancel);
 }
 
 class SearchEngineTest : public ::testing::Test {
@@ -32,70 +39,70 @@ protected:
 };
 
 TEST_F(SearchEngineTest, BasicSubstringMatch) {
-    auto entries = MakeEntries({
+    auto pool = MakePool({
         {L"report_2024.xlsx", L"C:\\docs\\report_2024.xlsx"},
         {L"summary.pdf", L"C:\\docs\\summary.pdf"},
         {L"report_q1.docx", L"C:\\docs\\report_q1.docx"},
     });
 
     SearchOptions opts{};
-    auto results = engine.Search(L"report", entries.data(), entries.size(), opts, 100, cancel);
+    auto results = DoSearch(engine, pool, L"report", opts, 100, cancel);
     EXPECT_EQ(results.size(), 2u);
 }
 
 TEST_F(SearchEngineTest, CaseSensitiveMatch) {
-    auto entries = MakeEntries({
+    auto pool = MakePool({
         {L"Report.txt", L"C:\\Report.txt"},
         {L"report.txt", L"C:\\report.txt"},
     });
 
     SearchOptions opts{};
     opts.caseSensitive = true;
-    auto results = engine.Search(L"Report", entries.data(), entries.size(), opts, 100, cancel);
+    auto results = DoSearch(engine, pool, L"Report", opts, 100, cancel);
     ASSERT_EQ(results.size(), 1u);
-    EXPECT_EQ(results[0].entry->name, L"Report.txt");
+    EXPECT_EQ(pool.GetName(results[0].entryIndex), L"Report.txt");
 }
 
 TEST_F(SearchEngineTest, CaseInsensitiveMatch) {
-    auto entries = MakeEntries({
+    auto pool = MakePool({
         {L"REPORT.txt", L"C:\\REPORT.txt"},
         {L"report.txt", L"C:\\report.txt"},
     });
 
     SearchOptions opts{};
     opts.caseSensitive = false;
-    auto results = engine.Search(L"report", entries.data(), entries.size(), opts, 100, cancel);
+    auto results = DoSearch(engine, pool, L"report", opts, 100, cancel);
     EXPECT_EQ(results.size(), 2u);
 }
 
 TEST_F(SearchEngineTest, WholeWordMatch) {
-    auto entries = MakeEntries({
+    auto pool = MakePool({
         {L"report.txt", L"C:\\report.txt"},
         {L"reports_final.txt", L"C:\\reports_final.txt"},
     });
 
     SearchOptions opts{};
     opts.wholeWord = true;
-    auto results = engine.Search(L"report", entries.data(), entries.size(), opts, 100, cancel);
+    auto results = DoSearch(engine, pool, L"report", opts, 100, cancel);
     ASSERT_EQ(results.size(), 1u);
-    EXPECT_EQ(results[0].entry->name, L"report.txt");
+    EXPECT_EQ(pool.GetName(results[0].entryIndex), L"report.txt");
 }
 
 TEST_F(SearchEngineTest, MatchPathOption) {
-    auto entries = MakeEntries({
+    auto pool = MakePool({
         {L"file.txt", L"C:\\Projects\\report\\file.txt"},
         {L"other.txt", L"C:\\Documents\\other.txt"},
     });
 
     SearchOptions opts{};
     opts.matchPath = true;
-    auto results = engine.Search(L"report", entries.data(), entries.size(), opts, 100, cancel);
+    auto results = DoSearch(engine, pool, L"report", opts, 100, cancel);
     ASSERT_EQ(results.size(), 1u);
-    EXPECT_EQ(results[0].entry->name, L"file.txt");
+    EXPECT_EQ(pool.GetName(results[0].entryIndex), L"file.txt");
 }
 
 TEST_F(SearchEngineTest, RegexMatch) {
-    auto entries = MakeEntries({
+    auto pool = MakePool({
         {L"invoice_001.pdf", L"C:\\invoice_001.pdf"},
         {L"invoice_abc.pdf", L"C:\\invoice_abc.pdf"},
         {L"summary.pdf", L"C:\\summary.pdf"},
@@ -103,59 +110,57 @@ TEST_F(SearchEngineTest, RegexMatch) {
 
     SearchOptions opts{};
     opts.useRegex = true;
-    auto results =
-        engine.Search(L"invoice_\\d+", entries.data(), entries.size(), opts, 100, cancel);
+    auto results = DoSearch(engine, pool, L"invoice_\\d+", opts, 100, cancel);
     ASSERT_EQ(results.size(), 1u);
-    EXPECT_EQ(results[0].entry->name, L"invoice_001.pdf");
+    EXPECT_EQ(pool.GetName(results[0].entryIndex), L"invoice_001.pdf");
 }
 
 TEST_F(SearchEngineTest, InvalidRegexReturnsEmpty) {
-    auto entries = MakeEntries({
-        {L"file.txt", L"C:\\file.txt"},
-    });
+    auto pool = MakePool({{L"file.txt", L"C:\\file.txt"}});
 
     SearchOptions opts{};
     opts.useRegex = true;
-    auto results =
-        engine.Search(L"[invalid(regex", entries.data(), entries.size(), opts, 100, cancel);
+    auto results = DoSearch(engine, pool, L"[invalid(regex", opts, 100, cancel);
     EXPECT_TRUE(results.empty());
 }
 
 TEST_F(SearchEngineTest, MaxResultsCap) {
-    std::vector<FileEntry> entries;
+    IndexPool pool;
     for (int i = 0; i < 200; ++i) {
         FileEntry e;
         e.name = L"file_" + std::to_wstring(i) + L".txt";
         e.path = L"C:\\" + e.name;
-        entries.push_back(e);
+        e.nameLower = e.name;
+        std::transform(e.nameLower.begin(), e.nameLower.end(), e.nameLower.begin(), ::towlower);
+        pool.AddEntry(e);
     }
 
     SearchOptions opts{};
-    auto results = engine.Search(L"fi", entries.data(), entries.size(), opts, 10, cancel);
+    auto results = DoSearch(engine, pool, L"fi", opts, 10, cancel);
     EXPECT_LE(results.size(), 10u);
 }
 
 TEST_F(SearchEngineTest, QueryTooShortReturnsEmpty) {
-    auto entries = MakeEntries({{L"file.txt", L"C:\\file.txt"}});
+    auto pool = MakePool({{L"file.txt", L"C:\\file.txt"}});
     SearchOptions opts{};
-    auto results = engine.Search(L"f", entries.data(), entries.size(), opts, 100, cancel);
+    auto results = DoSearch(engine, pool, L"f", opts, 100, cancel);
     EXPECT_TRUE(results.empty());
 }
 
 TEST_F(SearchEngineTest, CancelTokenAbortsSearch) {
-    std::vector<FileEntry> entries;
+    IndexPool pool;
     for (int i = 0; i < 100000; ++i) {
         FileEntry e;
         e.name = L"somefile_" + std::to_wstring(i) + L".txt";
         e.path = L"C:\\" + e.name;
-        entries.push_back(e);
+        e.nameLower = e.name;
+        std::transform(e.nameLower.begin(), e.nameLower.end(), e.nameLower.begin(), ::towlower);
+        pool.AddEntry(e);
     }
 
     std::atomic<bool> cancelNow{true};  // already cancelled
     SearchOptions opts{};
-    auto results =
-        engine.Search(L"somefile", entries.data(), entries.size(), opts, 10000, cancelNow);
-    // With immediate cancel the result set should be small or empty
+    auto results = DoSearch(engine, pool, L"somefile", opts, 10000, cancelNow);
     EXPECT_LT(results.size(), 10000u);
 }
 
@@ -170,7 +175,7 @@ class TokenSetMatchTest : public ::testing::Test {
 protected:
     SearchEngine engine;
     std::atomic<bool> cancel{false};
-    std::vector<FileEntry> entries = MakeEntries({
+    IndexPool pool = MakePool({
         {kLedZepName, kLedZepPath},
         {L"unrelated_song.mp3", L"C:\\music\\unrelated_song.mp3"},
     });
@@ -178,96 +183,91 @@ protected:
 };
 
 TEST_F(TokenSetMatchTest, SpaceSeparatorMatchesHyphen) {
-    auto r = engine.Search(L"just rosy", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"just rosy", opts, 100, cancel);
     ASSERT_EQ(r.size(), 1u);
-    EXPECT_EQ(r[0].entry->name, kLedZepName);
+    EXPECT_EQ(pool.GetName(r[0].entryIndex), kLedZepName);
 }
 
 TEST_F(TokenSetMatchTest, UpperCaseQuerySpaceSep) {
-    auto r = engine.Search(L"Just rosy", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"Just rosy", opts, 100, cancel);
     ASSERT_EQ(r.size(), 1u);
-    EXPECT_EQ(r[0].entry->name, kLedZepName);
+    EXPECT_EQ(pool.GetName(r[0].entryIndex), kLedZepName);
 }
 
 TEST_F(TokenSetMatchTest, UnderscoreSeparatorMatchesHyphen) {
-    auto r = engine.Search(L"just_rosy", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"just_rosy", opts, 100, cancel);
     ASSERT_EQ(r.size(), 1u);
-    EXPECT_EQ(r[0].entry->name, kLedZepName);
+    EXPECT_EQ(pool.GetName(r[0].entryIndex), kLedZepName);
 }
 
 TEST_F(TokenSetMatchTest, MixedSeparatorsInQuery) {
-    auto r = engine.Search(L"just rosy june", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"just rosy june", opts, 100, cancel);
     ASSERT_EQ(r.size(), 1u);
-    EXPECT_EQ(r[0].entry->name, kLedZepName);
+    EXPECT_EQ(pool.GetName(r[0].entryIndex), kLedZepName);
 }
 
 TEST_F(TokenSetMatchTest, NonAdjacentTokens) {
-    auto r = engine.Search(L"just rosy guitar", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"just rosy guitar", opts, 100, cancel);
     ASSERT_EQ(r.size(), 1u);
-    EXPECT_EQ(r[0].entry->name, kLedZepName);
+    EXPECT_EQ(pool.GetName(r[0].entryIndex), kLedZepName);
 }
 
 TEST_F(TokenSetMatchTest, TokensFromDifferentParts) {
-    auto r = engine.Search(L"rosy guitar flac", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"rosy guitar flac", opts, 100, cancel);
     ASSERT_EQ(r.size(), 1u);
-    EXPECT_EQ(r[0].entry->name, kLedZepName);
+    EXPECT_EQ(pool.GetName(r[0].entryIndex), kLedZepName);
 }
 
 TEST_F(TokenSetMatchTest, LedZepPlusRosy) {
-    auto r = engine.Search(L"LedZep rosy", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"LedZep rosy", opts, 100, cancel);
     ASSERT_EQ(r.size(), 1u);
-    EXPECT_EQ(r[0].entry->name, kLedZepName);
+    EXPECT_EQ(pool.GetName(r[0].entryIndex), kLedZepName);
 }
 
 TEST_F(TokenSetMatchTest, LedZepPlusFlac) {
-    auto r = engine.Search(L"ledzep flac", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"ledzep flac", opts, 100, cancel);
     ASSERT_EQ(r.size(), 1u);
-    EXPECT_EQ(r[0].entry->name, kLedZepName);
+    EXPECT_EQ(pool.GetName(r[0].entryIndex), kLedZepName);
 }
 
 TEST_F(TokenSetMatchTest, TokenOrderIrrelevant_GuitarFirst) {
-    auto r = engine.Search(L"just guitar rosy", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"just guitar rosy", opts, 100, cancel);
     ASSERT_EQ(r.size(), 1u);
-    EXPECT_EQ(r[0].entry->name, kLedZepName);
+    EXPECT_EQ(pool.GetName(r[0].entryIndex), kLedZepName);
 }
 
 TEST_F(TokenSetMatchTest, TokenOrderIrrelevant_RosyFirst) {
-    auto r = engine.Search(L"rosy just guitar", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"rosy just guitar", opts, 100, cancel);
     ASSERT_EQ(r.size(), 1u);
-    EXPECT_EQ(r[0].entry->name, kLedZepName);
+    EXPECT_EQ(pool.GetName(r[0].entryIndex), kLedZepName);
 }
 
 TEST_F(TokenSetMatchTest, AllTokensMustMatch_NegativeCase) {
-    // "piano" is not in the filename — should not match
-    auto r = engine.Search(L"just rosy piano", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"just rosy piano", opts, 100, cancel);
     EXPECT_EQ(r.size(), 0u);
 }
 
 TEST_F(TokenSetMatchTest, SingleWordQueryUsesSimdPath) {
-    // "ledzep" is a direct substring — still found via SIMD path
-    auto r = engine.Search(L"ledzep", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"ledzep", opts, 100, cancel);
     ASSERT_EQ(r.size(), 1u);
-    EXPECT_EQ(r[0].entry->name, kLedZepName);
+    EXPECT_EQ(pool.GetName(r[0].entryIndex), kLedZepName);
 }
 
 TEST_F(TokenSetMatchTest, ExactHyphenSubstringStillWorks) {
-    // "just-rosy" is a literal substring — SIMD finds it without token path
-    auto r = engine.Search(L"just-rosy", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"just-rosy", opts, 100, cancel);
     ASSERT_EQ(r.size(), 1u);
-    EXPECT_EQ(r[0].entry->name, kLedZepName);
+    EXPECT_EQ(pool.GetName(r[0].entryIndex), kLedZepName);
 }
 
 TEST_F(TokenSetMatchTest, CaseSensitiveModeSkipsTokenPath) {
     SearchOptions caseSens{};
     caseSens.caseSensitive = true;
-    // lowercase "just rosy" won't match mixed-case filename in case-sensitive mode
-    auto r = engine.Search(L"just rosy", entries.data(), entries.size(), caseSens, 100, cancel);
+    auto r = DoSearch(engine, pool, L"just rosy", caseSens, 100, cancel);
     EXPECT_EQ(r.size(), 0u);
 }
 
 TEST_F(TokenSetMatchTest, PartialTokenDoesNotMatch) {
-    // "led" and "zep" are not independent tokens in the filename ("ledzep" is one token)
-    auto r = engine.Search(L"led zep", entries.data(), entries.size(), opts, 100, cancel);
+    auto r = DoSearch(engine, pool, L"led zep", opts, 100, cancel);
     EXPECT_EQ(r.size(), 0u);
 }
 
@@ -349,8 +349,6 @@ TEST(TokenMatcherTest, AllQueryTokensPresent_EmptyQueryReturnsFalse) {
 // SIMD detection test
 TEST(SimdTest, DetectCaps) {
     auto caps = winindex::DetectSimdCaps();
-    // We can't assert specific caps since it depends on host CPU,
-    // but the call must not crash.
     (void)caps;
 }
 

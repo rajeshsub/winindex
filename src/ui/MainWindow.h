@@ -17,6 +17,18 @@
 
 namespace winindex {
 
+// Snapshot of display fields copied from the pool under shared lock.
+// Owned by the UI thread; never references into the pool after creation.
+struct DisplayEntry {
+    std::wstring name;
+    std::wstring path;
+    uint64_t size;
+    uint64_t lastModified;
+    uint32_t attributes;
+    uint32_t matchStart;
+    uint32_t matchLen;
+};
+
 class MainWindow {
 public:
     static bool Register(HINSTANCE hInst);
@@ -29,11 +41,11 @@ public:
     void OnSize(int cx, int cy);
     void OnCommand(WORD id);
     void OnContextMenu(HWND hwndFrom, int x, int y);
-    void OnSearchChanged();  // called from SearchBar on text change
+    void OnSearchChanged();
     void OnListDblClick();
     void OnListKeyDown(const NMLVKEYDOWN* kd);
     void OnIndexerStatus(const IndexerStatus& status);
-    void OnSearchResults(std::vector<SearchResult>* results);
+    void OnSearchResults(std::vector<DisplayEntry>* results);
     void OnDeviceChange(WPARAM event, LPARAM lp);
 
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
@@ -52,12 +64,11 @@ private:
     std::shared_ptr<Indexer> m_indexer;
     std::shared_ptr<SearchEngine> m_searchEngine;
 
-    std::vector<SearchResult> m_currentResults;
+    std::vector<DisplayEntry> m_currentResults;
     uint64_t m_totalMatches = 0;
     int m_sortColumn = -1;
     bool m_sortDescending = false;
 
-    // Debounce timer
     static constexpr UINT_PTR kSearchTimerId = 1;
     static constexpr UINT kDebounceMs = 150;
     std::atomic<bool> m_searchCancel{false};
@@ -74,7 +85,7 @@ private:
     void CutSelectedFiles();
     void DeleteSelectedFiles();
     void OnBeginDrag();
-    bool PreCheckFileExists(const FileEntry* entry);
+    bool PreCheckFileExists(const std::wstring& path);
     void ShowAbout();
     void SetStatusText(const std::wstring& text);
     void OnColumnClick(int col);

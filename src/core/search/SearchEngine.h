@@ -8,27 +8,27 @@ namespace winindex {
 
 class SearchEngine : public ISearchEngine {
 public:
-    std::vector<SearchResult> Search(const std::wstring& query, const FileEntry* entries,
-                                     uint64_t entryCount, const SearchOptions& options,
+    std::vector<SearchResult> Search(const std::wstring& query, const EntryMeta* meta,
+                                     uint64_t entryCount, const wchar_t* nameLowerPool,
+                                     const wchar_t* pathPool, const SearchOptions& options,
                                      uint32_t maxResults,
                                      const std::atomic<bool>& cancelToken) override;
 
 private:
-    // Regex search path
-    static std::vector<SearchResult> SearchRegex(const std::wstring& query,
-                                                 const FileEntry* entries, uint64_t entryCount,
+    static std::vector<SearchResult> SearchRegex(const std::wstring& query, const EntryMeta* meta,
+                                                 uint64_t entryCount, const wchar_t* nameLowerPool,
+                                                 const wchar_t* pathPool,
                                                  const SearchOptions& options, uint32_t maxResults,
                                                  const std::atomic<bool>& cancelToken);
 
-    // SIMD substring search path (parallelized)
-    static std::vector<SearchResult> SearchSubstring(const std::wstring& query,
-                                                     const FileEntry* entries, uint64_t entryCount,
-                                                     const SearchOptions& options,
-                                                     uint32_t maxResults,
-                                                     const std::atomic<bool>& cancelToken);
+    static std::vector<SearchResult> SearchSubstring(
+        const std::wstring& query, const EntryMeta* meta, uint64_t entryCount,
+        const wchar_t* nameLowerPool, const wchar_t* pathPool, const SearchOptions& options,
+        uint32_t maxResults, const std::atomic<bool>& cancelToken);
 
-    static bool MatchesWholeWord(const std::wstring& text, size_t matchPos, size_t matchLen);
-    static std::string WideToUtf8(const std::wstring& s);
+    static bool MatchesWholeWord(const wchar_t* text, size_t textLen, size_t matchPos,
+                                 size_t matchLen);
+    static std::string WideToUtf8(const wchar_t* s, size_t len);
 };
 
 }  // namespace winindex

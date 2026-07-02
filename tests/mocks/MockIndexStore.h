@@ -18,7 +18,6 @@ public:
     MOCK_METHOD(void, RemoveEntriesUnderPath, (const std::wstring& prefix), (override));
     MOCK_METHOD(void, ApplyRename, (const std::wstring& o, const std::wstring& n), (override));
     MOCK_METHOD(uint64_t, GetEntryCount, (), (const, override));
-    MOCK_METHOD(const FileEntry*, GetEntries, (), (const, override));
     MOCK_METHOD(uint64_t, GetSavedUsn, (const std::wstring& root), (const, override));
     MOCK_METHOD(void, SetSavedUsn, (const std::wstring& root, uint64_t usn), (override));
     MOCK_METHOD(uint64_t, GetIndexAgeSeconds, (), (const, override));

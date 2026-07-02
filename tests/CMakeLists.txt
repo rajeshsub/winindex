@@ -1,5 +1,6 @@
 add_executable(winindex_tests
     test_main.cpp
+    test_IndexPool.cpp
     test_IndexSerializer.cpp
     test_PathUtils.cpp
     test_SearchEngine.cpp
