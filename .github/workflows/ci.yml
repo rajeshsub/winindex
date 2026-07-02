@@ -138,6 +138,16 @@ jobs:
       - name: Build
         run: cmake --build build/asan --config Debug --parallel
 
+      - name: Add MSVC ASAN runtime to PATH
+        run: |
+          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          $msvcBin = (Get-ChildItem "$vsPath\VC\Tools\MSVC" |
+            Sort-Object Name -Descending | Select-Object -First 1).FullName + "\bin\Hostx64\x64"
+          Add-Content $env:GITHUB_PATH $msvcBin
+
       - name: Test (ASAN)
         working-directory: build/asan
         env:
