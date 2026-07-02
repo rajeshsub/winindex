@@ -64,7 +64,9 @@ private:
     void IndexingThread();
     void IndexPathsThread(const std::vector<std::wstring>& paths);
     void RemovePathsThread(const std::vector<std::wstring>& paths);
-    void ScanDrive(const std::wstring& root);
+    void ScanDriveInto(const std::wstring& root, const std::vector<std::wstring>& excludedPaths,
+                       std::vector<FileEntry>& out);
+    bool BuildAndApplyAdd(const std::wstring& path);
     void ApplyChange(const FileChangeEvent& evt);
     void StartLiveMonitoring();
     void StartWatchersForRoots(const std::vector<std::wstring>& roots);

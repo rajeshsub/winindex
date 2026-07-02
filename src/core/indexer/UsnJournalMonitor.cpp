@@ -76,8 +76,10 @@ uint64_t UsnJournalMonitor::ReplaySince(const std::wstring& root, uint64_t saved
                 evt.type = FileChangeType::Added;
             else if (record->Reason & USN_REASON_FILE_DELETE)
                 evt.type = FileChangeType::Removed;
+            else if (record->Reason & USN_REASON_RENAME_OLD_NAME)
+                evt.type = FileChangeType::Removed;
             else if (record->Reason & USN_REASON_RENAME_NEW_NAME)
-                evt.type = FileChangeType::Renamed;
+                evt.type = FileChangeType::Added;
             else
                 evt.type = FileChangeType::Modified;
 
@@ -143,8 +145,10 @@ void UsnJournalMonitor::StartMonitoring(const std::wstring& root, uint64_t start
                 evt.type = FileChangeType::Added;
             else if (record->Reason & USN_REASON_FILE_DELETE)
                 evt.type = FileChangeType::Removed;
+            else if (record->Reason & USN_REASON_RENAME_OLD_NAME)
+                evt.type = FileChangeType::Removed;
             else if (record->Reason & USN_REASON_RENAME_NEW_NAME)
-                evt.type = FileChangeType::Renamed;
+                evt.type = FileChangeType::Added;
             else
                 evt.type = FileChangeType::Modified;
 

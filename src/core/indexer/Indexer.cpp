@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <thread>
 #include <utility>
 
 namespace winindex {
@@ -102,10 +103,16 @@ void Indexer::IndexPaths(std::vector<std::wstring> paths) {
 
 void Indexer::IndexPathsThread(const std::vector<std::wstring>& paths) {
     EmitStatus(IndexerState::Scanning, L"Indexing new paths...");
+    std::vector<std::wstring> excludedPaths = m_settings->GetExcludedPaths();
     for (const auto& root : paths) {
         if (m_cancel.load(std::memory_order_relaxed))
             break;
-        ScanDrive(root);
+        std::vector<FileEntry> localEntries;
+        ScanDriveInto(root, excludedPaths, localEntries);
+        for (const auto& fe : localEntries) {
+            m_indexStore->ApplyAdd(fe);
+            ++m_filesIndexed;
+        }
     }
     if (!m_cancel.load(std::memory_order_relaxed)) {
         m_indexStore->Save();
@@ -206,7 +213,6 @@ void Indexer::EmitStatusDone(uint64_t filesIndexed, std::vector<std::wstring> lo
 
 void Indexer::IndexingThread() {
     EmitStatus(IndexerState::Scanning, L"Starting index build...");
-    m_indexStore->BeginWrite();
 
     auto selectedDrives = m_settings->GetSelectedDrives();
     if (selectedDrives.empty()) {
@@ -216,45 +222,75 @@ void Indexer::IndexingThread() {
         std::transform(fixed.begin(), fixed.end(), std::back_inserter(selectedDrives),
                        [](const DriveInfo& d) { return d.root; });
     }
-    for (const auto& root : selectedDrives) {
-        if (m_cancel.load(std::memory_order_relaxed))
-            break;
-        ScanDrive(root);
+
+    // Snapshot settings before spawning threads; Settings isn't thread-safe.
+    std::vector<std::wstring> excludedPaths = m_settings->GetExcludedPaths();
+
+    // Scan each drive on its own thread into a per-drive local buffer.
+    const size_t n = selectedDrives.size();
+    std::vector<std::vector<FileEntry>> perDrive(n);
+    std::vector<std::thread> scanThreads;
+    scanThreads.reserve(n);
+
+    for (size_t i = 0; i < n; ++i) {
+        scanThreads.emplace_back([this, &selectedDrives, &excludedPaths, &perDrive, i]() {
+            ScanDriveInto(selectedDrives[i], excludedPaths, perDrive[i]);
+        });
+    }
+    for (auto& t : scanThreads) t.join();
+
+    if (m_cancel.load(std::memory_order_relaxed)) {
+        SetEvent(m_completionEvent);
+        return;
     }
 
-    if (!m_cancel.load(std::memory_order_relaxed)) {
-        m_indexStore->EndWrite();
-        m_indexStore->Save();
-        EmitStatusDone(m_filesIndexed, m_settings->GetSelectedDrives());
+    m_indexStore->BeginWrite();
+    for (const auto& entries : perDrive) {
+        for (const auto& fe : entries) {
+            m_indexStore->AddEntry(fe);
+            ++m_filesIndexed;
+        }
     }
-
-    if (!m_cancel.load(std::memory_order_relaxed))
-        StartLiveMonitoring();
+    m_indexStore->EndWrite();
+    m_indexStore->Save();
+    EmitStatusDone(m_filesIndexed, m_settings->GetSelectedDrives());
+    StartLiveMonitoring();
     SetEvent(m_completionEvent);
 }
 
+bool Indexer::BuildAndApplyAdd(const std::wstring& path) {
+    WIN32_FILE_ATTRIBUTE_DATA fad{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &fad))
+        return false;
+    if (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        return false;
+    FileEntry fe;
+    size_t slash = path.rfind(L'\\');
+    fe.name = (slash != std::wstring::npos) ? path.substr(slash + 1) : path;
+    fe.nameLower = fe.name;
+    std::transform(fe.nameLower.begin(), fe.nameLower.end(), fe.nameLower.begin(), ::towlower);
+    fe.path = path;
+    fe.size = (static_cast<uint64_t>(fad.nFileSizeHigh) << 32) | fad.nFileSizeLow;
+    fe.lastModified = (static_cast<uint64_t>(fad.ftLastWriteTime.dwHighDateTime) << 32) |
+                      fad.ftLastWriteTime.dwLowDateTime;
+    fe.attributes = fad.dwFileAttributes;
+    m_indexStore->ApplyAdd(fe);
+    return true;
+}
+
 void Indexer::ApplyChange(const FileChangeEvent& evt) {
-    if (evt.type == FileChangeType::Added || evt.type == FileChangeType::Modified) {
-        WIN32_FILE_ATTRIBUTE_DATA fad{};
-        if (!GetFileAttributesExW(evt.path.c_str(), GetFileExInfoStandard, &fad))
-            return;
-        if (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-            return;
-        if (evt.type == FileChangeType::Modified)
-            m_indexStore->ApplyRemove(evt.path);
-        FileEntry fe;
-        size_t slash = evt.path.rfind(L'\\');
-        fe.name = (slash != std::wstring::npos) ? evt.path.substr(slash + 1) : evt.path;
-        fe.nameLower = fe.name;
-        std::transform(fe.nameLower.begin(), fe.nameLower.end(), fe.nameLower.begin(), ::towlower);
-        fe.path = evt.path;
-        fe.size = (static_cast<uint64_t>(fad.nFileSizeHigh) << 32) | fad.nFileSizeLow;
-        fe.lastModified = (static_cast<uint64_t>(fad.ftLastWriteTime.dwHighDateTime) << 32) |
-                          fad.ftLastWriteTime.dwLowDateTime;
-        fe.attributes = fad.dwFileAttributes;
-        m_indexStore->ApplyAdd(fe);
+    if (evt.type == FileChangeType::Added) {
+        BuildAndApplyAdd(evt.path);
+    } else if (evt.type == FileChangeType::Modified) {
+        m_indexStore->ApplyRemove(evt.path);
+        BuildAndApplyAdd(evt.path);
     } else if (evt.type == FileChangeType::Removed) {
         m_indexStore->ApplyRemove(evt.path);
+    } else if (evt.type == FileChangeType::Renamed) {
+        if (!evt.oldPath.empty())
+            m_indexStore->ApplyRename(evt.oldPath, evt.path);
+        else
+            BuildAndApplyAdd(evt.path);
     }
 }
 
@@ -284,34 +320,31 @@ void Indexer::StartWatchersForRoots(const std::vector<std::wstring>& roots) {
     }
 }
 
-void Indexer::ScanDrive(const std::wstring& root) {
+void Indexer::ScanDriveInto(const std::wstring& root,
+                            const std::vector<std::wstring>& excludedPaths,
+                            std::vector<FileEntry>& out) {
     DriveFilesystem fs = GetFilesystem(root);
 
-    // Select scanner: MFT for NTFS if admin available, FindFile otherwise
+    // Select scanner: MFT for NTFS if admin available, FindFile otherwise.
     IFileSystemScanner* scanner = m_findScanner.get();
 
     if (fs == DriveFilesystem::NTFS && m_mftScanner->IsMftAvailable(root)) {
         scanner = m_mftScanner.get();
-        EmitStatus(IndexerState::Scanning, L"Indexing " + root + L" (MFT mode)...", m_filesIndexed);
+        EmitStatus(IndexerState::Scanning, L"Indexing " + root + L" (MFT mode)...");
     } else if (fs == DriveFilesystem::NTFS) {
-        EmitStatus(
-            IndexerState::Scanning,
-            L"Indexing " + root + L" (standard mode - run as administrator for faster MFT scan)...",
-            m_filesIndexed);
+        EmitStatus(IndexerState::Scanning,
+                   L"Indexing " + root +
+                       L" (standard mode - run as administrator for faster MFT scan)...");
     } else {
-        EmitStatus(IndexerState::Scanning, L"Indexing " + root + L" (FAT32)...", m_filesIndexed);
+        EmitStatus(IndexerState::Scanning, L"Indexing " + root + L" (FAT32)...");
     }
 
     ScanOptions opts;
     opts.rootPaths = {root};
-    opts.excludedPaths = m_settings->GetExcludedPaths();
+    opts.excludedPaths = excludedPaths;
 
     scanner->Scan(
-        opts,
-        [this](const FileEntry& fe) {
-            m_indexStore->AddEntry(fe);
-            ++m_filesIndexed;
-        },
+        opts, [&out](const FileEntry& fe) { out.push_back(fe); },
         [this, &root](uint64_t count, const std::wstring& /*dir*/) {
             EmitStatus(IndexerState::Scanning,
                        L"Indexing " + root + L"... " + std::to_wstring(count) + L" files", count);
