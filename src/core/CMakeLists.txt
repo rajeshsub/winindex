@@ -7,6 +7,7 @@ add_library(winindex_core STATIC
     indexer/Indexer.cpp
     search/SearchEngine.cpp
     search/SimdSearch.cpp
+    search/SimdSearchAvx2.cpp
     search/TokenMatcher.cpp
     storage/IndexPool.cpp
     storage/IndexStore.cpp
@@ -25,6 +26,14 @@ target_link_libraries(winindex_core
     PUBLIC  re2::re2 # So much faster than the std::regex so using this.
     PRIVATE ntdll
 )
+
+# SimdSearchAvx2.cpp must be compiled with AVX2 enabled so intrinsics are available.
+# Runtime detection in SimdFindSubstring() guards actual execution on non-AVX2 CPUs.
+if(MSVC)
+    set_source_files_properties(search/SimdSearchAvx2.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
+else()
+    set_source_files_properties(search/SimdSearchAvx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2")
+endif()
 
 # Expose interfaces for mocking in tests
 target_sources(winindex_core PUBLIC
