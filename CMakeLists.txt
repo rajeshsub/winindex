@@ -70,6 +70,7 @@ if(ENABLE_ASAN)
 endif()
 
 # ---------- Subdirectories ----------
+enable_testing()
 add_subdirectory(src/core)
 add_subdirectory(src/ui)
 add_subdirectory(tests)

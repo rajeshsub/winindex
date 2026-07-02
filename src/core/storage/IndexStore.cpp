@@ -140,4 +140,18 @@ void IndexStore::SetSavedUsn(const std::wstring& root, uint64_t usn) {
     m_usnMap[root] = usn;
 }
 
+uint64_t IndexStore::GetIndexAgeSeconds() const {
+    WIN32_FILE_ATTRIBUTE_DATA fad{};
+    if (!GetFileAttributesExW(IndexFilePath().c_str(), GetFileExInfoStandard, &fad))
+        return UINT64_MAX;
+    FILETIME now{};
+    GetSystemTimeAsFileTime(&now);
+    uint64_t nowVal = (static_cast<uint64_t>(now.dwHighDateTime) << 32) | now.dwLowDateTime;
+    uint64_t fileVal = (static_cast<uint64_t>(fad.ftLastWriteTime.dwHighDateTime) << 32) |
+                       fad.ftLastWriteTime.dwLowDateTime;
+    if (nowVal <= fileVal)
+        return 0;
+    return (nowVal - fileVal) / 10000000ULL;
+}
+
 }  // namespace winindex

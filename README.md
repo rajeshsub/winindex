@@ -106,9 +106,7 @@ Binaries land in `build/release/src/ui/Release/winindex.exe`.
 ### Running tests
 
 ```bat
-cmake --preset windows-msvc-debug
-cmake --build --preset debug
-ctest --preset test-debug
+build.bat test
 ```
 
 ---
@@ -119,7 +117,7 @@ Settings are stored in `%APPDATA%\winindex\winindex.ini` (or next to the `.exe` 
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `SelectedDrives` | *(chosen on first run)* | Semicolon-separated drive roots to index, e.g. `C:\;D:\` |
+| `SelectedDrives` | *(chosen on first run)* | Semicolon-separated paths to index, e.g. `C:\;D:\;E:\projects\` (drive roots or specific folders) |
 | `ExcludedPaths` | See below | Pipe-separated paths excluded from indexing |
 | `ReindexIntervalHours` | `48` | Hours before the index is considered stale; `0` = manual only |
 | `UseRegex` | `0` | Enable RE2 regex search |
@@ -153,11 +151,14 @@ These are applied as the initial default on a new install. Once a user has saved
 | Alt+3 | Toggle whole-word |
 | Alt+4 | Toggle match path |
 | Alt+5 | Toggle ignore diacritics |
+| Down / Up | Move focus from search bar to result list |
 | Enter | Open selected file |
 | Ctrl+Enter | Open containing folder |
 | Ctrl+C | Copy full path(s) |
 | Ctrl+X | Cut (shell move to clipboard) |
 | Delete | Move to Recycle Bin |
+
+You can also **drag files** directly from the result list to Explorer, the Desktop, or any drop target that accepts `CF_HDROP` (copy or move).
 
 ---
 
@@ -204,7 +205,11 @@ After cloning:
 winget install Python.Python.3.12 LLVM.LLVM Cppcheck.Cppcheck
 pip install pre-commit
 pre-commit install
+pre-commit install --hook-type pre-push
 ```
+
+`pre-commit install` wires commit-time checks (clang-format, cppcheck).
+`pre-commit install --hook-type pre-push` wires the pre-push gate that builds and runs the full test suite before a push.
 
 To run all checks on the full codebase (one-time cleanup):
 

@@ -31,6 +31,7 @@ public:
 
     uint64_t GetSavedUsn(const std::wstring& root) const override;
     void SetSavedUsn(const std::wstring& root, uint64_t usn) override;
+    uint64_t GetIndexAgeSeconds() const override;
 
 private:
     std::shared_ptr<Settings> m_settings;

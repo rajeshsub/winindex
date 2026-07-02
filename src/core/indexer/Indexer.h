@@ -10,6 +10,7 @@
 #include "IFileSystemScanner.h"
 #include "IUsnJournalMonitor.h"
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -23,8 +24,10 @@ enum class IndexerState { Idle, Scanning, LoadingIndex, WatchingForChanges, Erro
 struct IndexerStatus {
     IndexerState state;
     std::wstring message;
-    uint64_t filesIndexed;
-    uint32_t skippedPaths;
+    uint64_t filesIndexed = 0;
+    uint32_t skippedPaths = 0;
+    std::vector<std::wstring> locations;  // populated when state == WatchingForChanges
+    uint64_t indexAgeSeconds = 0;         // 0 = freshly built; actual age when loaded from cache
 };
 
 using StatusCallback = std::function<void(const IndexerStatus&)>;
@@ -68,6 +71,8 @@ private:
     void StopWatchersForRoots(const std::vector<std::wstring>& roots);
     void EmitStatus(IndexerState state, std::wstring message, uint64_t filesIndexed = 0,
                     uint32_t skipped = 0);
+    void EmitStatusDone(uint64_t filesIndexed, std::vector<std::wstring> locations,
+                        uint64_t ageSeconds = 0);
 
     std::shared_ptr<IFileSystemScanner> m_mftScanner;
     std::shared_ptr<IFileSystemScanner> m_findScanner;

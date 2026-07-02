@@ -44,25 +44,17 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
                         EnableWindow(GetDlgItem(hwnd, IDC_REINDEX_UNIT), !manual);
                     }
                     return TRUE;
-                case IDC_PATH_ADD_DRIVE:
-                    if (self)
-                        self->OnAddDrive(hwnd);
-                    return TRUE;
-                case IDC_PATH_ADD_FOLDER:
-                    if (self)
-                        self->OnAddFolder(hwnd);
+                case IDC_PATH_ADD_LOCATION:
+                    OnAddLocation(hwnd);
                     return TRUE;
                 case IDC_PATH_REMOVE:
-                    if (self)
-                        self->OnRemovePath(hwnd);
+                    OnRemovePath(hwnd);
                     return TRUE;
                 case IDC_EXCL_ADD:
-                    if (self)
-                        self->OnAddExclusion(hwnd);
+                    OnAddExclusion(hwnd);
                     return TRUE;
                 case IDC_EXCL_REMOVE:
-                    if (self)
-                        self->OnRemoveExclusion(hwnd);
+                    OnRemoveExclusion(hwnd);
                     return TRUE;
             }
             break;
@@ -71,7 +63,7 @@ INT_PTR CALLBACK SettingsDialog::DlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
 }
 
 void SettingsDialog::OnInit(HWND hwnd) {
-    SetWindowTextW(hwnd, L"winindex — Settings");
+    SetWindowTextW(hwnd, L"winindex - Settings");
 
     // Paths-to-index list
     HWND hPathList = GetDlgItem(hwnd, IDC_PATH_LIST);
@@ -150,52 +142,12 @@ void SettingsDialog::OnOk(HWND hwnd) {
     m_settings->SetExcludedPaths(excls);
 }
 
-void SettingsDialog::OnAddDrive(HWND hwnd) {
-    auto drives = EnumerateAllDrives();
-    if (drives.empty()) {
-        MessageBoxW(hwnd, L"No drives found.", L"winindex", MB_OK | MB_ICONINFORMATION);
-        return;
-    }
-
-    // Build a simple picker: show each drive and let user pick one
-    std::vector<std::wstring> labels;
-    for (const auto& d : drives) {
-        std::wstring label = d.root;
-        if (!d.label.empty())
-            label += L" (" + d.label + L")";
-        labels.push_back(label);
-    }
-
-    // Use a dialog-box-style listbox via CreateDialog would be heavy;
-    // for simplicity show a message with options and use LB_FINDSTRING approach.
-    // Better: present as a popup using a simple listbox dialog.
-    // For now, use the existing folder browser pointing at "My Computer" root.
+void SettingsDialog::OnAddLocation(HWND hwnd) {
     wchar_t path[MAX_PATH]{};
     BROWSEINFOW bi{};
     bi.hwndOwner = hwnd;
     bi.pszDisplayName = path;
     bi.lpszTitle = L"Select a drive or folder to add:";
-    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
-    PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&bi);
-    if (pidl) {
-        wchar_t fullPath[MAX_PATH]{};
-        if (SHGetPathFromIDListW(pidl, fullPath)) {
-            // Normalise to drive root if user picked a drive root
-            HWND hList = GetDlgItem(hwnd, IDC_PATH_LIST);
-            if (SendMessageW(hList, LB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),
-                             reinterpret_cast<LPARAM>(fullPath)) == LB_ERR)
-                SendMessageW(hList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(fullPath));
-        }
-        CoTaskMemFree(pidl);
-    }
-}
-
-void SettingsDialog::OnAddFolder(HWND hwnd) {
-    wchar_t path[MAX_PATH]{};
-    BROWSEINFOW bi{};
-    bi.hwndOwner = hwnd;
-    bi.pszDisplayName = path;
-    bi.lpszTitle = L"Select folder to index:";
     bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
     PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&bi);
     if (pidl) {
@@ -218,7 +170,6 @@ void SettingsDialog::OnRemovePath(HWND hwnd) {
 }
 
 void SettingsDialog::OnAddExclusion(HWND hwnd) {
-    // Browse for folder
     wchar_t path[MAX_PATH]{};
     BROWSEINFOW bi{};
     bi.hwndOwner = hwnd;

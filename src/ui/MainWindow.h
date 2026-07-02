@@ -73,6 +73,7 @@ private:
     void CopySelectedPaths(bool filenameOnly);
     void CutSelectedFiles();
     void DeleteSelectedFiles();
+    void OnBeginDrag();
     bool PreCheckFileExists(const FileEntry* entry);
     void ShowAbout();
     void SetStatusText(const std::wstring& text);

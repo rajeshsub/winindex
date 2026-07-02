@@ -1,8 +1,7 @@
-enable_testing()
-
 add_executable(winindex_tests
     test_main.cpp
     test_IndexSerializer.cpp
+    test_PathUtils.cpp
     test_SearchEngine.cpp
     test_Settings.cpp
     test_DriveEnumerator.cpp
@@ -25,4 +24,4 @@ target_include_directories(winindex_tests PRIVATE
 )
 
 include(GoogleTest)
-gtest_discover_tests(winindex_tests DISCOVERY_MODE PRE_TEST)
+gtest_discover_tests(winindex_tests)
