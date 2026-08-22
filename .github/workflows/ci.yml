@@ -74,7 +74,10 @@ jobs:
           $ct = "$env:GITHUB_WORKSPACE\llvm\bin\clang-tidy.exe"
           & $ct --version
           $files = Get-ChildItem -Path src -Recurse -Include *.cpp | Select-Object -ExpandProperty FullName
-          & $ct --config-file=.clang-tidy -p build/lint $files
+          # Force cl driver mode + C++20 explicitly: compile_commands.json alone left clang-tidy
+          # parsing as an older standard (std::wstring::starts_with, a C++20 member, was reported
+          # missing even though the project targets C++20).
+          & $ct --config-file=.clang-tidy -p build/lint --extra-arg-before=--driver-mode=cl --extra-arg=/std:c++20 $files
 
 
   build-debug:
