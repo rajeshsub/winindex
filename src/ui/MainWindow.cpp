@@ -175,8 +175,9 @@ void MainWindow::OnCreate() {
 
     m_settings = std::make_shared<Settings>(portable, exeDir);
     m_settings->Load();
-    Logger::Instance().Init(m_settings->GetDataDirectory() + L"\\winindex.log");
-    Logger::Instance().Log(L"Application started.");
+    Logger::Instance().Init(m_settings->GetDataDirectory() + L"\\winindex.log",
+                             m_settings->GetLogLevel());
+    Logger::Instance().Log(LogLevel::Info, L"Application started.");
     m_indexStore = std::make_shared<IndexStore>(m_settings);
     m_searchEngine = std::make_shared<SearchEngine>();
 
@@ -493,7 +494,8 @@ void MainWindow::OnSearchResults(std::vector<DisplayEntry>* results) {
 
 void MainWindow::OnIndexerStatus(const IndexerStatus& status) {
     if (!status.message.empty())
-        Logger::Instance().Log(status.message);
+        Logger::Instance().Log(status.state == IndexerState::Error ? LogLevel::Error : LogLevel::Info,
+                                status.message);
 
     bool hasIndex =
         (status.state == IndexerState::WatchingForChanges || status.state == IndexerState::Idle);
@@ -834,10 +836,10 @@ void MainWindow::OnDeviceChange(WPARAM event, LPARAM lp) {
     }
 
     if (event == DBT_DEVICEARRIVAL) {
-        Logger::Instance().Log(L"Drive arrived: " + drives);
+        Logger::Instance().Log(LogLevel::Info, L"Drive arrived: " + drives);
         SetStatusText(L"Drive " + drives + L" connected. Open Index > Settings to add it.");
     } else {
-        Logger::Instance().Log(L"Drive removed: " + drives);
+        Logger::Instance().Log(LogLevel::Info, L"Drive removed: " + drives);
         SetStatusText(L"Drive " + drives + L" disconnected.");
     }
 }

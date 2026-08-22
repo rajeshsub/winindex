@@ -1,5 +1,6 @@
 #pragma once
 #include "../search/ISearchEngine.h"
+#include "Logger.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -41,6 +42,10 @@ public:
 
     bool IsPortableMode() const { return m_portable; }
 
+    // Log verbosity (rule 17: externally configurable, defaults to WARNING in production).
+    LogLevel GetLogLevel() const;
+    void SetLogLevel(LogLevel level);
+
 private:
     bool m_portable;
     std::wstring m_dataDir;
@@ -51,6 +56,7 @@ private:
     uint64_t m_reindexIntervalHours = kReindexDefaultHours;
     SearchOptions m_searchOptions{};
     bool m_firstRun = true;
+    LogLevel m_logLevel = LogLevel::Warning;
 
     static std::vector<std::wstring> DefaultExcludedPaths();
 

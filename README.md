@@ -194,6 +194,18 @@ Tagged releases (`v*`) trigger the CI release job which produces:
 
 - **ZIP** — portable build, extract and run
 - **NSIS installer** — installs to `Program Files`, creates a Start Menu shortcut
+- **SHA256SUMS.txt** — checksums for both assets above
+
+### Verifying a download
+
+Each release includes `SHA256SUMS.txt`. After downloading an asset, verify it matches:
+
+```powershell
+Get-FileHash winindex-*.zip -Algorithm SHA256
+# compare against the matching line in SHA256SUMS.txt
+```
+
+Release tags are not currently signed; checksums are the verification path today.
 
 ---
 

@@ -5,6 +5,7 @@ add_executable(winindex_tests
     test_PathUtils.cpp
     test_SearchEngine.cpp
     test_Settings.cpp
+    test_Logger.cpp
     test_DriveEnumerator.cpp
     test_Indexer.cpp
     mocks/MockFileSystemScanner.h

@@ -112,3 +112,30 @@ TEST_F(SettingsTest, FirstRunFlag) {
 TEST_F(SettingsTest, DataDirectoryIsExeDir) {
     EXPECT_EQ(settings->GetDataDirectory(), tmpDir);
 }
+
+TEST_F(SettingsTest, DefaultLogLevelIsWarning) {
+    settings->Load();
+    EXPECT_EQ(settings->GetLogLevel(), LogLevel::Warning);
+}
+
+TEST_F(SettingsTest, LogLevelPersists) {
+    settings->Load();
+    settings->SetLogLevel(LogLevel::Debug);
+    settings->Save();
+
+    Settings s2(true, tmpDir);
+    s2.Load();
+    EXPECT_EQ(s2.GetLogLevel(), LogLevel::Debug);
+}
+
+TEST_F(SettingsTest, GarbageLogLevelFallsBackToWarning) {
+    settings->Load();
+    settings->Save();
+    // Corrupt the ini directly with an unrecognized value.
+    std::wstring iniPath = tmpDir + L"\\winindex.ini";
+    WritePrivateProfileStringW(L"General", L"LogLevel", L"NOT_A_LEVEL", iniPath.c_str());
+
+    Settings s2(true, tmpDir);
+    s2.Load();
+    EXPECT_EQ(s2.GetLogLevel(), LogLevel::Warning);
+}

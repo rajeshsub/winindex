@@ -6,16 +6,30 @@ on:
     tags: [ "v*" ]
   pull_request:
     branches: [ main ]
+  schedule:
+    # Re-check pinned dependencies for advisories disclosed after they were pinned (rule 18).
+    - cron: '0 6 * * 1'
 
 jobs:
+  dep-vuln-scan:
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Check dependency vulnerabilities (OSV.dev)
+        shell: pwsh
+        run: ./scripts/check_dep_vulns.ps1
+
   lint:
     runs-on: windows-latest
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Install LLVM 22.1.7 (clang-format)
+      - name: Install LLVM 22.1.7 (clang-format, clang-tidy)
         run: |
           Invoke-WebRequest -Uri "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.7/LLVM-22.1.7-win64.exe" -OutFile llvm.exe
           7z x llvm.exe -ollvm -y | Out-Null
@@ -35,6 +49,24 @@ jobs:
             exit 1
           }
 
+      - name: Install Cppcheck
+        run: choco install cppcheck --no-progress -y
+
+      - name: Run cppcheck
+        run: |
+          $files = Get-ChildItem -Path src -Recurse -Include *.cpp | Select-Object -ExpandProperty FullName
+          & 'C:\Program Files\Cppcheck\cppcheck.exe' --language=c++ --std=c++20 --enable=warning,style,performance --error-exitcode=1 --quiet $files
+
+      - name: Configure CMake (compile_commands.json for clang-tidy)
+        run: cmake -B build/lint -A x64 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run clang-tidy
+        run: |
+          $ct = "$env:GITHUB_WORKSPACE\llvm\bin\clang-tidy.exe"
+          & $ct --version
+          $files = Get-ChildItem -Path src -Recurse -Include *.cpp | Select-Object -ExpandProperty FullName
+          & $ct --config-file=.clang-tidy -p build/lint $files
+
 
   build-debug:
     needs: lint
@@ -42,10 +74,10 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Cache FetchContent dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: build/debug/_deps
           key: fetchcontent-debug-${{ hashFiles('CMakeLists.txt') }}
@@ -63,7 +95,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-results-debug
           path: build/debug/Testing/
@@ -74,10 +106,10 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Cache FetchContent dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: build/release/_deps
           key: fetchcontent-release-${{ hashFiles('CMakeLists.txt') }}
@@ -102,14 +134,14 @@ jobs:
           -- ctest --test-dir build/release -C Release --output-on-failure
 
       - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@0f8570b1a125f4937846a11fcfa3bcd548bd8c97 # v4.6.0
         with:
           files: build/release/coverage.xml
-          fail_ci_if_error: false
+          fail_ci_if_error: true
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-results-release
           path: build/release/Testing/
@@ -120,10 +152,10 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Cache FetchContent dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: build/asan/_deps
           key: fetchcontent-asan-${{ hashFiles('CMakeLists.txt') }}
@@ -155,6 +187,63 @@ jobs:
         # Exclude OS-level storage tests that may produce false positives from Win32 APIs
         run: ctest -C Debug --output-on-failure -E "DriveEnumerator|Indexer"
 
+  benchmark:
+    needs: lint
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: build/benchmark/_deps
+          key: fetchcontent-benchmark-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: fetchcontent-benchmark-
+
+      - name: Restore benchmark history
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: benchmark-results
+          key: benchmark-history-${{ github.run_id }}
+          restore-keys: benchmark-history-
+
+      - name: Configure CMake
+        run: cmake -B build/benchmark -A x64 -DBUILD_BENCHMARKS=ON
+
+      - name: Build
+        run: cmake --build build/benchmark --config Release --target winindex_benchmarks --parallel
+
+      - name: Run benchmarks
+        run: |
+          New-Item -ItemType Directory -Force -Path benchmark-results | Out-Null
+          $sha = $env:GITHUB_SHA.Substring(0,7)
+          $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+          & build\benchmark\Release\winindex_benchmarks.exe `
+            --benchmark_out="benchmark-results\$stamp-$sha-$($env:GITHUB_RUN_ID).json" `
+            --benchmark_out_format=json
+
+      - name: Render trend into job summary
+        run: python scripts/render_benchmark_trend.py benchmark-results | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+
+      - name: Save benchmark history
+        if: always()
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: benchmark-results
+          key: benchmark-history-${{ github.run_id }}
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: benchmark-results
+          path: benchmark-results/
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-debug, build-release]
@@ -162,12 +251,15 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Cache FetchContent dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: build/_deps
           key: fetchcontent-release-${{ hashFiles('CMakeLists.txt') }}
@@ -193,11 +285,20 @@ jobs:
         run: cpack -G NSIS -C Release
         working-directory: build
 
+      - name: Generate checksums
+        working-directory: build
+        run: |
+          Get-ChildItem -Include *.zip,*.exe -File | ForEach-Object {
+            $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File -Append -Encoding ascii SHA256SUMS.txt
+          }
+
       - name: Upload Release Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             build/*.zip
             build/*.exe
+            build/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

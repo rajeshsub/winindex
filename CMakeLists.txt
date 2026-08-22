@@ -46,6 +46,19 @@ FetchContent_Declare(
 set(RE2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(re2)
 
+option(BUILD_BENCHMARKS "Build Google Benchmark microbenchmarks" OFF)
+if(BUILD_BENCHMARKS)
+    FetchContent_Declare(
+        benchmark
+        GIT_REPOSITORY https://github.com/google/benchmark.git
+        GIT_TAG        v1.9.1
+    )
+    set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(benchmark)
+endif()
+
 # MSVC-specific flags — applied after FetchContent so third-party code is unaffected
 if(MSVC)
     add_compile_options(/W4 /WX /permissive- /sdl /GS)
@@ -74,6 +87,9 @@ enable_testing()
 add_subdirectory(src/core)
 add_subdirectory(src/ui)
 add_subdirectory(tests)
+if(BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
+endif()
 
 # ---------- Optional documentation ----------
 option(BUILD_DOCS "Build Doxygen documentation" OFF)

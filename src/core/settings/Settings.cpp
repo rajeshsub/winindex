@@ -62,6 +62,10 @@ void Settings::Load() {
     m_searchOptions.wholeWord = ReadInt(L"Search", L"WholeWord", 0) != 0;
     m_searchOptions.matchPath = ReadInt(L"Search", L"MatchPath", 0) != 0;
     m_searchOptions.ignoreDiacritics = ReadInt(L"Search", L"IgnoreDiacritics", 0) != 0;
+
+    std::wstring logLevelStr = ReadString(L"General", L"LogLevel", L"WARNING");
+    LogLevel parsed;
+    m_logLevel = TryParseLogLevel(logLevelStr, parsed) ? parsed : LogLevel::Warning;
 }
 
 void Settings::Save() const {
@@ -82,6 +86,8 @@ void Settings::Save() const {
     WriteInt(L"Search", L"WholeWord", m_searchOptions.wholeWord ? 1 : 0);
     WriteInt(L"Search", L"MatchPath", m_searchOptions.matchPath ? 1 : 0);
     WriteInt(L"Search", L"IgnoreDiacritics", m_searchOptions.ignoreDiacritics ? 1 : 0);
+
+    WriteString(L"General", L"LogLevel", ToWString(m_logLevel));
 }
 
 const std::vector<std::wstring>& Settings::GetSelectedDrives() const {
@@ -117,6 +123,13 @@ bool Settings::IsFirstRun() const {
 }
 void Settings::SetFirstRunComplete() {
     m_firstRun = false;
+}
+
+LogLevel Settings::GetLogLevel() const {
+    return m_logLevel;
+}
+void Settings::SetLogLevel(LogLevel level) {
+    m_logLevel = level;
 }
 
 std::vector<std::wstring> Settings::DefaultExcludedPaths() {
