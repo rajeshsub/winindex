@@ -40,7 +40,9 @@ For why a decision was made, see `docs/adr/`; this doc describes how the system 
     journal isn't available.
   - `Indexer` - orchestrates the above: decides scan vs. load-from-disk vs. watch, drives
     `IndexerState` (`Idle -> Scanning|LoadingIndex -> WatchingForChanges`, or `Error`), reports
-    progress via `StatusCallback`.
+    progress via `StatusCallback`. Takes its scanners, monitor, store and settings as
+    constructor-injected `shared_ptr`s (not owned/constructed internally) - the same seam that
+    lets `tests/mocks/` substitute fakes for `Indexer`'s unit tests.
 - `src/core/storage/` - the index itself.
   - `IndexPool` - the actual data: flat `EntryMeta[]` plus separate contiguous `wchar_t` pools
     for lowercased names and paths, so the hot substring-search path scans a compact working set
@@ -66,6 +68,20 @@ For why a decision was made, see `docs/adr/`; this doc describes how the system 
 
 Single writer (`Indexer`/`IndexStore` on the indexing/watch path), multiple readers (`MainWindow`
 search threads). Guarded by `IndexStore`'s `std::shared_mutex`: writes exclusive, searches shared.
+Every `IndexStore` mutation method takes its lock internally (verified in `IndexStore.cpp`), so
+callers don't need external lock discipline - safe by construction regardless of caller thread.
+
+Threads that call into `IndexStore`:
+- `Indexer`'s own worker thread (`CreateThread`-based) drives the scan/load/watch state machine
+  and calls `Load`/`Save`/`ApplyAdd`/`RemoveEntriesUnderPath`; a scan additionally fans out into
+  per-drive `std::thread`s that each stream `AddEntry` calls for their own drive.
+- `ChangeWatcher`'s independent watch thread (`WatchThread`, one per non-NTFS root) invokes
+  `Indexer::ApplyChange` from its own thread, which calls `IndexStore::Apply{Add,Remove,Rename}`.
+- `UsnJournalMonitor::ReplaySince` runs synchronously on `Indexer`'s own thread - it does not
+  spawn a thread of its own.
+- Each `MainWindow` search keystroke spawns a background `std::thread` that takes the shared lock
+  via `SearchEngine`; it never calls into `IndexStore`'s mutation methods.
+
 No network-facing concurrency; not in Service/API scope (rule 22 doesn't apply).
 
 ## External dependencies
