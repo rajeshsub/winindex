@@ -67,7 +67,11 @@ jobs:
       - name: Configure CMake (compile_commands.json for clang-tidy)
         # MSVC's default (Visual Studio) generator never emits compile_commands.json;
         # only Ninja/Makefiles generators do, hence Ninja + msvc-dev-cmd here.
-        run: cmake -B build/lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+        # CMAKE_CXX_SCAN_FOR_MODULES=OFF: this project has no C++20 modules, but CMake's
+        # default Ninja+MSVC module scanning still injects "@*.obj.modmap" response-file
+        # args into compile_commands.json, which clang-tidy's forced cl driver mode can't
+        # resolve (fails to open the response file, corrupting subsequent arg parsing).
+        run: cmake -B build/lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
 
       - name: Run clang-tidy
         run: |
