@@ -246,7 +246,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path benchmark-results | Out-Null
           $sha = $env:GITHUB_SHA.Substring(0,7)
           $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-          & build\benchmark\Release\winindex_benchmarks.exe `
+          & .\build\benchmark\Release\winindex_benchmarks.exe `
             --benchmark_out="benchmark-results\$stamp-$sha-$($env:GITHUB_RUN_ID).json" `
             --benchmark_out_format=json
 
