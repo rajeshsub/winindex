@@ -78,15 +78,15 @@ jobs:
           $ct = "$env:GITHUB_WORKSPACE\llvm\bin\clang-tidy.exe"
           & $ct --version
           $files = Get-ChildItem -Path src -Recurse -Include *.cpp | Select-Object -ExpandProperty FullName
-          # Force cl driver mode + C++20 explicitly: compile_commands.json alone left clang-tidy
-          # parsing as an older standard (std::wstring::starts_with, a C++20 member, was reported
-          # missing even though the project targets C++20).
-          # Neither cl-style spelling worked on this runner: "/std:c++20" got misread as a
-          # positional input file ("no such file or directory: '/std:c++20'"), and "-std:c++20"
-          # was rejected outright ("unknown argument: '-std:c++20'"). "/clang:" is clang-cl's
-          # documented escape hatch for forwarding a raw clang flag straight to cc1, bypassing
-          # cl-style option matching entirely, so it can't hit either failure mode.
-          & $ct --config-file=.clang-tidy -p build/lint --extra-arg-before=--driver-mode=cl --extra-arg-before=/clang:-std=c++20 $files
+          # Force cl driver mode: without it, clang-tidy fell back to an older standard
+          # (std::wstring::starts_with, a C++20 member, was reported missing even though the
+          # project targets C++20). No manual std flag here: every spelling we tried
+          # ("/std:c++20", "-std:c++20", "/clang:-std=c++20") as an --extra-arg-before was
+          # misparsed by this Windows clang-tidy build, each in a different way. CMake already
+          # writes an authentic "/std:c++20" into compile_commands.json for CXX_STANDARD 20 on
+          # the real MSVC cl.exe, and that one is read straight from the database like every
+          # other flag (/EHsc, /Zc:, /I, ...), not injected, so it isn't subject to that bug.
+          & $ct --config-file=.clang-tidy -p build/lint --extra-arg-before=--driver-mode=cl $files
 
 
   build-debug:
