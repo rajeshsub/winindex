@@ -29,6 +29,7 @@ private:
     static bool MatchesWholeWord(const wchar_t* text, size_t textLen, size_t matchPos,
                                  size_t matchLen);
     static std::string WideToUtf8(const wchar_t* s, size_t len);
+    static void WideToUtf8(const wchar_t* s, size_t len, std::string& out);
 };
 
 }  // namespace winindex

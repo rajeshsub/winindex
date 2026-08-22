@@ -15,13 +15,20 @@
 namespace winindex {
 
 std::string SearchEngine::WideToUtf8(const wchar_t* s, size_t len) {
-    if (len == 0)
-        return {};
+    std::string r;
+    WideToUtf8(s, len, r);
+    return r;
+}
+
+void SearchEngine::WideToUtf8(const wchar_t* s, size_t len, std::string& out) {
+    if (len == 0) {
+        out.clear();
+        return;
+    }
     int sz =
         WideCharToMultiByte(CP_UTF8, 0, s, static_cast<int>(len), nullptr, 0, nullptr, nullptr);
-    std::string r(static_cast<size_t>(sz), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, s, static_cast<int>(len), r.data(), sz, nullptr, nullptr);
-    return r;
+    out.resize(static_cast<size_t>(sz));
+    WideCharToMultiByte(CP_UTF8, 0, s, static_cast<int>(len), out.data(), sz, nullptr, nullptr);
 }
 
 bool SearchEngine::MatchesWholeWord(const wchar_t* text, size_t textLen, size_t pos, size_t len) {
@@ -60,7 +67,9 @@ std::vector<SearchResult> SearchEngine::SearchRegex(
     RE2 re(utf8Query, re2opts);
     if (!re.ok())
         return {};
-    RE2 reCapture("(" + utf8Query + ")", re2opts);
+    std::unique_ptr<RE2> reCapture;
+    if (options.wholeWord)
+        reCapture = std::make_unique<RE2>("(" + utf8Query + ")", re2opts);
 
     unsigned int numThreads = std::max(1u, std::thread::hardware_concurrency());
     uint64_t chunkSize = (entryCount + numThreads - 1) / numThreads;
@@ -77,6 +86,8 @@ std::vector<SearchResult> SearchEngine::SearchRegex(
 
         futures.push_back(
             std::async(std::launch::async, [&, begin, end]() -> std::vector<SearchResult> {
+                thread_local std::string tlsUtf8Buf;
+
                 std::vector<SearchResult> local;
                 for (uint64_t i = begin; i < end; ++i) {
                     if (cancelToken.load(std::memory_order_relaxed))
@@ -98,11 +109,12 @@ std::vector<SearchResult> SearchEngine::SearchRegex(
                         targetLen = static_cast<size_t>(m.pathLen - m.nameStart);
                     }
 
-                    std::string utf8Target = WideToUtf8(targetData, targetLen);
+                    WideToUtf8(targetData, targetLen, tlsUtf8Buf);
+                    const std::string& utf8Target = tlsUtf8Buf;
 
                     if (options.wholeWord) {
                         re2::StringPiece match;
-                        if (!reCapture.ok() || !RE2::PartialMatch(utf8Target, reCapture, &match))
+                        if (!reCapture->ok() || !RE2::PartialMatch(utf8Target, *reCapture, &match))
                             continue;
                         size_t matchPos = static_cast<size_t>(match.data() - utf8Target.data());
                         if (!MatchesWholeWord(targetData, targetLen, matchPos, match.size()))
