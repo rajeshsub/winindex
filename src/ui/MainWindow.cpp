@@ -176,7 +176,7 @@ void MainWindow::OnCreate() {
     m_settings = std::make_shared<Settings>(portable, exeDir);
     m_settings->Load();
     Logger::Instance().Init(m_settings->GetDataDirectory() + L"\\winindex.log",
-                             m_settings->GetLogLevel());
+                            m_settings->GetLogLevel());
     Logger::Instance().Log(LogLevel::Info, L"Application started.");
     m_indexStore = std::make_shared<IndexStore>(m_settings);
     m_searchEngine = std::make_shared<SearchEngine>();
@@ -494,8 +494,8 @@ void MainWindow::OnSearchResults(std::vector<DisplayEntry>* results) {
 
 void MainWindow::OnIndexerStatus(const IndexerStatus& status) {
     if (!status.message.empty())
-        Logger::Instance().Log(status.state == IndexerState::Error ? LogLevel::Error : LogLevel::Info,
-                                status.message);
+        Logger::Instance().Log(
+            status.state == IndexerState::Error ? LogLevel::Error : LogLevel::Info, status.message);
 
     bool hasIndex =
         (status.state == IndexerState::WatchingForChanges || status.state == IndexerState::Idle);
