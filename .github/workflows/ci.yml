@@ -81,12 +81,12 @@ jobs:
           # Force cl driver mode + C++20 explicitly: compile_commands.json alone left clang-tidy
           # parsing as an older standard (std::wstring::starts_with, a C++20 member, was reported
           # missing even though the project targets C++20).
-          # Std flag uses a dash ("-std:c++20"), not a slash: a leading "/" is pre-classified as
-          # a Windows absolute path by clang-cl's driver before it reaches cl-style option
-          # matching, so "/std:c++20" gets treated as a positional input file ("no such file or
-          # directory: '/std:c++20'") instead of a flag. The dash form hits the same cl-compatible
-          # option table without tripping that check.
-          & $ct --config-file=.clang-tidy -p build/lint --extra-arg-before=--driver-mode=cl --extra-arg-before=-std:c++20 $files
+          # Neither cl-style spelling worked on this runner: "/std:c++20" got misread as a
+          # positional input file ("no such file or directory: '/std:c++20'"), and "-std:c++20"
+          # was rejected outright ("unknown argument: '-std:c++20'"). "/clang:" is clang-cl's
+          # documented escape hatch for forwarding a raw clang flag straight to cc1, bypassing
+          # cl-style option matching entirely, so it can't hit either failure mode.
+          & $ct --config-file=.clang-tidy -p build/lint --extra-arg-before=--driver-mode=cl --extra-arg-before=/clang:-std=c++20 $files
 
 
   build-debug:
