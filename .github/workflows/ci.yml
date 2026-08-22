@@ -57,8 +57,17 @@ jobs:
           $files = Get-ChildItem -Path src -Recurse -Include *.cpp | Select-Object -ExpandProperty FullName
           & 'C:\Program Files\Cppcheck\cppcheck.exe' --language=c++ --std=c++20 --enable=warning,style,performance --error-exitcode=1 --quiet $files
 
+      - name: Install Ninja
+        run: choco install ninja --no-progress -y
+
+      - uses: ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c # v1.13.0
+        with:
+          arch: x64
+
       - name: Configure CMake (compile_commands.json for clang-tidy)
-        run: cmake -B build/lint -A x64 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+        # MSVC's default (Visual Studio) generator never emits compile_commands.json;
+        # only Ninja/Makefiles generators do, hence Ninja + msvc-dev-cmd here.
+        run: cmake -B build/lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
       - name: Run clang-tidy
         run: |
