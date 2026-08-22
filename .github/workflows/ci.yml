@@ -81,7 +81,10 @@ jobs:
           # Force cl driver mode + C++20 explicitly: compile_commands.json alone left clang-tidy
           # parsing as an older standard (std::wstring::starts_with, a C++20 member, was reported
           # missing even though the project targets C++20).
-          & $ct --config-file=.clang-tidy -p build/lint --extra-arg-before=--driver-mode=cl --extra-arg=/std:c++20 $files
+          # Both go through --extra-arg-before: a plain --extra-arg is appended after the
+          # database's own args (including the trailing source file), so in cl driver mode
+          # "/std:c++20" ends up parsed as a positional input file instead of a flag.
+          & $ct --config-file=.clang-tidy -p build/lint --extra-arg-before=--driver-mode=cl --extra-arg-before=/std:c++20 $files
 
 
   build-debug:
