@@ -56,6 +56,9 @@ if(BUILD_BENCHMARKS)
     set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
     set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
     set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    # google/benchmark defaults this ON, building its own vendored sources with
+    # warnings-as-error; a C4267 in its sysinfo.cc then fails the build on MSVC.
+    set(BENCHMARK_ENABLE_WERROR OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(benchmark)
 endif()
 
